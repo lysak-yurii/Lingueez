@@ -7,7 +7,7 @@ import sys
 import threading
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
@@ -407,10 +407,15 @@ class MainWindow(QMainWindow):
         self.table.setColumnHidden(COL_SOURCE, True)
         self.table.setColumnHidden(COL_CREATED, True)
 
-        self._col_resize_timer = QTimer(self)
-        self._col_resize_timer.setSingleShot(True)
-        self._col_resize_timer.setInterval(60)
-        self._col_resize_timer.timeout.connect(self._fit_word_columns)
+        # Refitting the word columns repaints the whole viewport, which is
+        # too slow to do on every resize tick — throttle to ~12 fps and
+        # always run once more after the drag stops.
+        self._col_fit_timer = QTimer(self)
+        self._col_fit_timer.setSingleShot(True)
+        self._col_fit_timer.setInterval(80)
+        self._col_fit_timer.timeout.connect(self._fit_word_columns)
+        self._col_fit_elapsed = QElapsedTimer()
+        self._col_fit_elapsed.start()
         QTimer.singleShot(0, self._fit_word_columns)
 
         tw.addWidget(self.table)
@@ -437,13 +442,16 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if not hasattr(self, '_col_resize_timer'):
+        if not hasattr(self, '_col_fit_timer'):
             return
-        if not self._col_resize_timer.isActive():
-            self.table.setUpdatesEnabled(False)
-        self._col_resize_timer.start()
+        if self._col_fit_elapsed.elapsed() >= self._col_fit_timer.interval():
+            self._fit_word_columns()
+        else:
+            self._col_fit_timer.start()
 
     def _fit_word_columns(self):
+        self._col_fit_timer.stop()
+        self._col_fit_elapsed.restart()
         header = self.table.horizontalHeader()
         viewport_w = self.table.viewport().width()
         fixed = sum(
@@ -454,7 +462,6 @@ class MainWindow(QMainWindow):
         available = max(100, viewport_w - fixed)
         self.table.setColumnWidth(COL_WORD1, available // 2)
         self.table.setColumnWidth(COL_WORD2, available - available // 2)
-        self.table.setUpdatesEnabled(True)
 
     def _on_selection_changed(self, *_):
         count = len(self.table.selectionModel().selectedRows())
@@ -668,9 +675,11 @@ class MainWindow(QMainWindow):
 
     def toggle_source_column(self, checked):
         self.table.setColumnHidden(COL_SOURCE, not checked)
+        self._fit_word_columns()
 
     def toggle_created_column(self, checked):
         self.table.setColumnHidden(COL_CREATED, not checked)
+        self._fit_word_columns()
 
     def prompt_row_limit(self):
         current = self.word_filter.row_limit or 0

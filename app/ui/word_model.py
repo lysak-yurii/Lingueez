@@ -27,25 +27,58 @@ EMPTY_DF_COLUMNS = ["ID", "Status", "Language1", "Word1", "Language2", "Word2",
                     "Source", "created_at", "edited_at", "favorite"]
 
 
+_DIM_COLS = frozenset((COL_STATUS, COL_LANG1, COL_LANG2, COL_SOURCE, COL_CREATED))
+
+# Plain ints — comparing against Qt enum members is measurably slower in
+# the data() hot path.
+_ROLE_DISPLAY = int(Qt.DisplayRole)
+_ROLE_EDIT = int(Qt.EditRole)
+_ROLE_FOREGROUND = int(Qt.ForegroundRole)
+_ROLE_BACKGROUND = int(Qt.BackgroundRole)
+
+
+def _fmt(value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    return str(value)
+
+
 class WordTableModel(QAbstractTableModel):
+    """Read-only model over the filtered word DataFrame.
+
+    data() is the hottest path in the app (Qt queries several roles per
+    visible cell on every repaint), so display values are precomputed
+    into plain lists in set_dataframe() — never touch pandas there.
+    """
+
     def __init__(self, colors, parent=None):
         super().__init__(parent)
         self._df = pd.DataFrame(columns=EMPTY_DF_COLUMNS)
-        self._colors = colors
+        self._rows = []
+        self._favorites = []
+        self.set_colors(colors)
 
     def set_colors(self, colors):
         self._colors = colors
+        self._fav_brush = QBrush(QColor(colors["favorite"]))
+        self._dim_brush = QBrush(QColor(colors["text_dim"]))
 
     def set_dataframe(self, df):
         self.beginResetModel()
         self._df = df.reset_index(drop=True)
+        self._rows = [
+            (_fmt(t.ID), None, _fmt(t.Status), _fmt(t.Language1), _fmt(t.Word1),
+             _fmt(t.Language2), _fmt(t.Word2), _fmt(t.Source), _fmt(t.created_at)[:19])
+            for t in self._df.itertuples(index=False)
+        ]
+        self._favorites = self._df["favorite"].fillna(0).astype(bool).tolist()
         self.endResetModel()
 
     def dataframe(self):
         return self._df
 
     def rowCount(self, parent=QModelIndex()):
-        return 0 if parent.isValid() else len(self._df)
+        return 0 if parent.isValid() else len(self._rows)
 
     def columnCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(COLUMNS)
@@ -55,31 +88,18 @@ class WordTableModel(QAbstractTableModel):
             return HEADERS[section]
         return None
 
-    def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid():
-            return None
-        row = self._df.iloc[index.row()]
-        col = index.column()
-
-        if role in (Qt.DisplayRole, Qt.EditRole):
+    def data(self, index, role=_ROLE_DISPLAY):
+        role = int(role)
+        if role == _ROLE_DISPLAY or role == _ROLE_EDIT:
+            row = index.row()
+            col = index.column()
             if col == COL_ROWNUM:
-                return index.row() + 1
-            value = row.get(COLUMNS[col]) if COLUMNS[col] != "RowNumber" else None
-            if value is None or (isinstance(value, float) and pd.isna(value)):
-                return ""
-            if col == COL_CREATED:
-                return str(value)[:19]
-            return str(value)
-
-        if role == Qt.BackgroundRole and bool(row.get("favorite")):
-            return QBrush(QColor(self._colors["favorite"]))
-
-        if role == Qt.ForegroundRole and col in (COL_STATUS, COL_LANG1, COL_LANG2, COL_SOURCE, COL_CREATED):
-            return QBrush(QColor(self._colors["text_dim"]))
-
-        if role == Qt.UserRole:  # full record for the row
-            return row.to_dict()
-
+                return row + 1
+            return self._rows[row][col]
+        if role == _ROLE_FOREGROUND:
+            return self._dim_brush if index.column() in _DIM_COLS else None
+        if role == _ROLE_BACKGROUND:
+            return self._fav_brush if self._favorites[index.row()] else None
         return None
 
     def row_record(self, row_index):
