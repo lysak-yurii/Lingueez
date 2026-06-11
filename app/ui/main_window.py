@@ -37,6 +37,28 @@ from app.version import APP_NAME, APP_VERSION, BUILD_NUMBER
 
 GEOMETRY_FILE = "window_geometry.json"
 PREDEFINED_STATUSES = ["New", "To Learn", "Learning", "Mastered", "Ignored"]
+DEFAULT_HOTKEY = "Ctrl+Shift+V"
+
+
+def _hotkey_to_pynput(seq):
+    """Qt portable shortcut ("Ctrl+Shift+V") -> pynput ("<ctrl>+<shift>+v")."""
+    mapped = []
+    for part in (p.strip().lower() for p in seq.split("+") if p.strip()):
+        if part in ("meta", "super", "win"):
+            mapped.append("<cmd>")
+        elif len(part) == 1:
+            mapped.append(part)
+        else:
+            mapped.append(f"<{part}>")  # ctrl, shift, alt, f1, space, …
+    return "+".join(mapped)
+
+
+def _hotkey_to_keyboard(seq):
+    """Qt portable shortcut -> 'keyboard' module format (Windows)."""
+    return "+".join(
+        "windows" if p in ("meta", "super", "cmd") else p
+        for p in (s.strip().lower() for s in seq.split("+") if s.strip())
+    )
 
 # sync status -> (icon name, color key)
 SYNC_ICONS = {
@@ -143,6 +165,8 @@ class MainWindow(QMainWindow):
         self._build_tray()
         self._setup_shortcuts()
         self._setup_global_hotkey()
+        # size hints are only reliable once widgets are polished
+        QTimer.singleShot(0, self._lock_filter_row_height)
 
         self.sync_status_changed.connect(self._update_sync_status_ui)
         self.hotkey_pressed.connect(self.open_add_word_and_translate)
@@ -168,9 +192,9 @@ class MainWindow(QMainWindow):
         base_font = max(8, round(10 * widget_scaling))
         font_pt = max(7, round(base_font * d["scale"]))
         row_px = round(font_pt * d["row_ratio"])
-        font = self.table.font()
-        font.setPointSize(font_pt)
-        self.table.setFont(font)
+        # widget-level stylesheet: wins over the app stylesheet regardless of
+        # polish order (setFont() is overridden by the app QSS at startup)
+        self.table.setStyleSheet(f"QTableView {{ font-size: {font_pt}pt; }}")
         self.table.verticalHeader().setDefaultSectionSize(row_px)
 
     def _icon(self, name, color_key="text", size=20):
@@ -572,8 +596,11 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence.Copy, self.table, self.copy_selected)
         QShortcut(QKeySequence.Delete, self.table, self.delete_rows)
 
+    def _hotkey_setting(self):
+        return (self.settings.get("hotkey", DEFAULT_HOTKEY) or "").strip()
+
     def _setup_global_hotkey(self):
-        """Global Ctrl+Shift+V.
+        """Global Add-Word hotkey (configurable in Settings → System).
 
         On Linux the pynput listener runs in a SEPARATE PROCESS — its X11
         record thread can segfault, and in-process that kills the whole
@@ -582,15 +609,53 @@ class MainWindow(QMainWindow):
         """
         self._hotkey_listener = None
         self._hotkey_proc = None
-        try:
-            if sys.platform == 'win32':
-                import keyboard
-                keyboard.add_hotkey('ctrl+shift+v', self.hotkey_pressed.emit)
-                return
-        except Exception as exc:
-            logging.warning(f"Global hotkey unavailable: {exc}")
+        self._hotkey_handle = None
+        self._active_hotkey = None
+        self._apply_global_hotkey()
+
+    def _apply_global_hotkey(self):
+        """(Re)register the hotkey from settings; safe to call repeatedly."""
+        hotkey = self._hotkey_setting()
+        if hotkey == self._active_hotkey:
             return
-        self._start_hotkey_agent()
+        self._active_hotkey = hotkey
+        self._update_tray_hotkey_label()
+
+        if sys.platform == 'win32':
+            try:
+                import keyboard
+                if self._hotkey_handle is not None:
+                    keyboard.remove_hotkey(self._hotkey_handle)
+                    self._hotkey_handle = None
+                if hotkey:
+                    self._hotkey_handle = keyboard.add_hotkey(
+                        _hotkey_to_keyboard(hotkey), self.hotkey_pressed.emit)
+            except Exception as exc:
+                logging.warning(f"Global hotkey unavailable: {exc}")
+            return
+
+        self._stop_hotkey_agent()
+        if hotkey:
+            self._start_hotkey_agent()
+
+    def _update_tray_hotkey_label(self):
+        action = getattr(self, "tray_add_action", None)
+        if action is not None:
+            hotkey = self._hotkey_setting()
+            action.setText(f"Add Word ({hotkey})" if hotkey else "Add Word")
+
+    def _stop_hotkey_agent(self):
+        proc = self._hotkey_proc
+        if proc is None:
+            return
+        try:
+            proc.finished.disconnect(self._on_hotkey_agent_died)
+        except Exception:
+            pass
+        proc.kill()
+        proc.waitForFinished(1000)
+        proc.deleteLater()
+        self._hotkey_proc = None
 
     def _start_hotkey_agent(self):
         from PySide6.QtCore import QProcess
@@ -598,7 +663,7 @@ class MainWindow(QMainWindow):
                              "system", "hotkey_agent.py")
         proc = QProcess(self)
         proc.setProgram(sys.executable)
-        proc.setArguments([agent])
+        proc.setArguments([agent, _hotkey_to_pynput(self._active_hotkey or DEFAULT_HOTKEY)])
         proc.readyReadStandardOutput.connect(self._on_hotkey_agent_output)
         proc.finished.connect(self._on_hotkey_agent_died)
         proc.start()
@@ -627,7 +692,8 @@ class MainWindow(QMainWindow):
         menu.addAction("Show", self.show_window)
         menu.addAction("Hide", self.hide)
         menu.addSeparator()
-        menu.addAction("Add Word (Ctrl+Shift+V)", self.open_add_word_and_translate)
+        self.tray_add_action = menu.addAction("Add Word", self.open_add_word_and_translate)
+        self._update_tray_hotkey_label()
         menu.addSeparator()
         menu.addAction("Quit", self.quit_app)
         self.tray.setContextMenu(menu)
@@ -1269,6 +1335,7 @@ class MainWindow(QMainWindow):
             self.model.set_colors(self.colors)
             self._refresh_icons()
             self._lock_filter_row_height()
+            self._apply_global_hotkey()
             self._apply_table_density()
             self.refresh_display()
             show_toast(self, "Settings", "Settings saved.", "success")

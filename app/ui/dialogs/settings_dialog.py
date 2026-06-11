@@ -2,11 +2,12 @@
 import os
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QSpinBox, QTabWidget, QTextEdit,
-    QVBoxLayout, QWidget,
+    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QKeySequenceEdit,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox,
+    QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from app.config import get_bool, get_float, get_int, load_settings, save_settings
@@ -309,11 +310,26 @@ class SettingsDialog(QDialog):
         self.autostart_check = QCheckBox("Start automatically on login (minimized to tray)")
         self.autostart_check.setChecked(get_autostart_enabled())
         form.addRow(self.autostart_check)
-        note = QLabel("The app also supports a --minimized command line flag and a global "
-                      "Ctrl+Shift+V hotkey that opens 'Add Word' with the clipboard content.")
-        note.setObjectName("dimLabel")
-        note.setWordWrap(True)
-        form.addRow(note)
+        autostart_note = QLabel("Autostart launches the app with the --minimized flag, so it "
+                                "begins hidden in the tray.")
+        autostart_note.setObjectName("dimLabel")
+        autostart_note.setWordWrap(True)
+        form.addRow(autostart_note)
+
+        self.hotkey_edit = QKeySequenceEdit(
+            QKeySequence(self.settings.get("hotkey", "Ctrl+Shift+V")))
+        try:
+            self.hotkey_edit.setMaximumSequenceLength(1)
+            self.hotkey_edit.setClearButtonEnabled(True)
+        except AttributeError:  # Qt < 6.4/6.5
+            pass
+        form.addRow("Add Word hotkey (global)", self.hotkey_edit)
+        hotkey_note = QLabel("Click the field and press the desired key combination — it opens "
+                             "'Add Word' with the clipboard content from anywhere. "
+                             "Leave empty to disable.")
+        hotkey_note.setObjectName("dimLabel")
+        hotkey_note.setWordWrap(True)
+        form.addRow(hotkey_note)
         return _scrollable(widget)
 
     # ----------------------------------------------------------- actions
@@ -362,6 +378,9 @@ class SettingsDialog(QDialog):
                 updated[key] = "True" if widget.isChecked() else "False"
             elif isinstance(widget, QComboBox):
                 updated[key] = widget.currentText()
+
+        seq = self.hotkey_edit.keySequence().toString(QKeySequence.PortableText)
+        updated["hotkey"] = seq.split(", ")[0]  # first chord only
 
         save_settings(updated)
 
