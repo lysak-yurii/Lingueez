@@ -56,7 +56,13 @@ class WordTableModel(QAbstractTableModel):
         self._df = pd.DataFrame(columns=EMPTY_DF_COLUMNS)
         self._rows = []
         self._favorites = []
+        self._header_overrides = {}
         self.set_colors(colors)
+
+    def set_header_text(self, col, text):
+        """Override a header label (e.g. blank under embedded filter combos)."""
+        self._header_overrides[col] = text
+        self.headerDataChanged.emit(Qt.Horizontal, col, col)
 
     def set_colors(self, colors):
         self._colors = colors
@@ -85,7 +91,8 @@ class WordTableModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            return HEADERS[section]
+            override = self._header_overrides.get(section)
+            return HEADERS[section] if override is None else override
         return None
 
     def data(self, index, role=_ROLE_DISPLAY):

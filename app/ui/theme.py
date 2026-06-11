@@ -21,6 +21,10 @@ DARK = {
     "favorite": "#2b3a55",
     "row_alt": "#151b22",
     "selection": "#2d4f8a",
+    "accent_soft": "#1f3050",
+    "accent_soft_hover": "#26395f",
+    "accent_soft_pressed": "#1a2940",
+    "accent_text": "#7fb0ff",
 }
 
 LIGHT = {
@@ -40,6 +44,10 @@ LIGHT = {
     "favorite": "#dbe7ff",
     "row_alt": "#f2f5f9",
     "selection": "#cfe0ff",
+    "accent_soft": "#e2ebfc",
+    "accent_soft_hover": "#d2e1fa",
+    "accent_soft_pressed": "#c1d4f7",
+    "accent_text": "#2257c5",
 }
 
 
@@ -164,6 +172,19 @@ QComboBox[filterActive="true"] {{
     border: 1px solid {c['accent']};
     background: {c['selection']};
 }}
+QComboBox#headerFilter {{
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 2px 4px 2px 6px;
+    font-weight: 600;
+    color: {c['text_dim']};
+}}
+QComboBox#headerFilter:hover {{ background: {c['surface_alt']}; color: {c['text']}; }}
+QComboBox#headerFilter[filterActive="true"] {{
+    color: {c['accent']};
+    background: {c['selection']};
+}}
 
 /* ---------- buttons ---------- */
 QPushButton {{
@@ -183,6 +204,14 @@ QPushButton#primaryButton {{
 }}
 QPushButton#primaryButton:hover {{ background: {c['accent_hover']}; }}
 QPushButton#primaryButton:pressed {{ background: {c['accent_pressed']}; }}
+QPushButton#tonalButton {{
+    background: {c['accent_soft']};
+    border: none;
+    color: {c['accent_text']};
+    font-weight: 600;
+}}
+QPushButton#tonalButton:hover {{ background: {c['accent_soft_hover']}; }}
+QPushButton#tonalButton:pressed {{ background: {c['accent_soft_pressed']}; }}
 QPushButton#dangerButton {{
     background: transparent;
     border: 1px solid {c['danger']};

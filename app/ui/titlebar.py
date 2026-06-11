@@ -40,6 +40,15 @@ class WindowControls(QWidget):
         self.layout().addWidget(btn)
         return btn
 
+    def set_colors(self, colors):
+        """Re-tint the control icons after a theme change."""
+        self._colors = colors
+        self.min_btn.setIcon(icons.icon("win-min", colors["text_dim"], 16))
+        maximized = self._window.isMaximized()
+        self.max_btn.setIcon(icons.icon(
+            "win-restore" if maximized else "win-max", colors["text_dim"], 16))
+        self.close_btn.setIcon(icons.icon("x", colors["text_dim"], 16))
+
     def _toggle_maximize(self):
         if self._window.isMaximized():
             self._window.showNormal()

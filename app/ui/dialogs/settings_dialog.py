@@ -76,6 +76,24 @@ class SettingsDialog(QDialog):
         setattr(self, f"w_{key}", edit)
         return edit
 
+    @staticmethod
+    def _secret(edit):
+        """Mask a line edit (API keys) and add an eye toggle to reveal it."""
+        from app.ui import icons, theme
+        dim = theme.current_colors()["text_dim"]
+        edit.setEchoMode(QLineEdit.Password)
+        action = edit.addAction(icons.icon("eye", dim, 16),
+                                QLineEdit.TrailingPosition)
+        action.setToolTip("Show / hide")
+
+        def toggle():
+            hidden = edit.echoMode() == QLineEdit.Password
+            edit.setEchoMode(QLineEdit.Normal if hidden else QLineEdit.Password)
+            action.setIcon(icons.icon("eye-off" if hidden else "eye", dim, 16))
+
+        action.triggered.connect(toggle)
+        return edit
+
     def _spin(self, key, lo, hi, default=0):
         spin = QSpinBox()
         spin.setRange(lo, hi)
@@ -226,7 +244,7 @@ class SettingsDialog(QDialog):
         deepl = QWidget()
         form = QFormLayout(deepl)
         form.setContentsMargins(18, 18, 18, 18)
-        form.addRow("API key", self._line("api_key"))
+        form.addRow("API key", self._secret(self._line("api_key")))
         form.addRow("API URL", self._line("api_url"))
         note = QLabel('Get a key at <a href="https://www.deepl.com/pro-api">deepl.com/pro-api</a>. '
                       'Use https://api-free.deepl.com/v2/translate for free-tier keys.')
@@ -240,8 +258,7 @@ class SettingsDialog(QDialog):
         openai_w = QWidget()
         form = QFormLayout(openai_w)
         form.setContentsMargins(18, 18, 18, 18)
-        self.openai_key_edit = QLineEdit(self.env.get("OPENAI_API_KEY", ""))
-        self.openai_key_edit.setEchoMode(QLineEdit.Password)
+        self.openai_key_edit = self._secret(QLineEdit(self.env.get("OPENAI_API_KEY", "")))
         form.addRow("OpenAI API key (.env)", self.openai_key_edit)
 
         defs = QGroupBox("Definitions")
@@ -272,8 +289,7 @@ class SettingsDialog(QDialog):
         form.addRow("Enable cloud sync", self._check("enable_sync", False))
         self.supabase_url_edit = QLineEdit(self.env.get("SUPABASE_URL", ""))
         form.addRow("Supabase URL (.env)", self.supabase_url_edit)
-        self.supabase_key_edit = QLineEdit(self.env.get("SUPABASE_KEY", ""))
-        self.supabase_key_edit.setEchoMode(QLineEdit.Password)
+        self.supabase_key_edit = self._secret(QLineEdit(self.env.get("SUPABASE_KEY", "")))
         form.addRow("Supabase key (.env)", self.supabase_key_edit)
         form.addRow("Bin cleanup grace (days)", self._spin("cleanup_grace_period_days", 1, 365, 30))
         test_btn = QPushButton("Test Connection")

@@ -8,7 +8,9 @@ import threading
 from datetime import datetime, timedelta
 
 from PySide6.QtCore import QElapsedTimer, QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QGuiApplication, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QAction, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
     QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QStatusBar,
@@ -28,10 +30,10 @@ from app.ui import icons, theme
 from app.ui.toast import show_toast
 from app.ui.word_model import (
     COL_ID, COL_CREATED, COL_LANG1, COL_LANG2, COL_SOURCE, COL_STATUS,
-    COL_WORD1, COL_WORD2, WordFilter, WordTableModel, words_to_dataframe,
+    COL_WORD1, COL_WORD2, HEADERS, WordFilter, WordTableModel, words_to_dataframe,
 )
 from app.ui.workers import run_in_thread
-from app.version import APP_NAME, APP_VERSION
+from app.version import APP_NAME, APP_VERSION, BUILD_NUMBER
 
 GEOMETRY_FILE = "window_geometry.json"
 PREDEFINED_STATUSES = ["New", "To Learn", "Learning", "Mastered", "Ignored"]
@@ -73,6 +75,39 @@ def load_geometry(window, window_id, default_size=(1100, 680), filename=GEOMETRY
     window.resize(*default_size)
 
 
+class _HeaderFilterCombo(QComboBox):
+    """Filter combo embedded in the table header; ignores wheel events so
+    scrolling over the header doesn't change filters accidentally."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class WordTableView(QTableView):
+    """QTableView where a plain left click on the only selected row
+    deselects it again (no Ctrl needed)."""
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and event.modifiers() == Qt.NoModifier:
+            index = self.indexAt(event.position().toPoint())
+            sel = self.selectionModel()
+            if index.isValid() and sel is not None:
+                rows = sel.selectedRows()
+                if len(rows) == 1 and rows[0].row() == index.row():
+                    self.clearSelection()
+                    event.accept()
+                    return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        # The first press of a double-click may have just deselected the
+        # row; restore it so doubleClicked handlers see a selection.
+        index = self.indexAt(event.position().toPoint())
+        if index.isValid() and not self.selectionModel().selectedRows():
+            self.selectRow(index.row())
+        super().mouseDoubleClickEvent(event)
+
+
 class MainWindow(QMainWindow):
     sync_status_changed = Signal(str, str)
     hotkey_pressed = Signal()
@@ -83,6 +118,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = settings
         self.colors = theme.current_colors()
+        self._themed_icons = []  # (target, name, color_key, size) for re-tinting
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon("icon.png"))
@@ -140,6 +176,23 @@ class MainWindow(QMainWindow):
     def _icon(self, name, color_key="text", size=20):
         return icons.icon(name, self.colors[color_key], size)
 
+    def _set_icon(self, target, name, color_key="text", size=20):
+        """Set a themed icon and remember it so theme switches re-tint it."""
+        target.setIcon(self._icon(name, color_key, size))
+        self._themed_icons.append((target, name, color_key, size))
+
+    def _refresh_icons(self):
+        """Re-tint all registered icons after a theme change."""
+        for target, name, color_key, size in self._themed_icons:
+            target.setIcon(self._icon(name, color_key, size))
+        self._on_favorites_toggled(self.favorites_btn.isChecked())
+        if self.is_reading_active:
+            self.read_button.setIcon(self._icon("stop", "danger", 17))
+        self.window_controls.set_colors(self.colors)
+        old_menu = self.app_menu
+        self.app_menu = self._build_app_menu()
+        old_menu.deleteLater()
+
     def _build_app_menu(self):
         """Hamburger menu with file operations and view options."""
         menu = QMenu(self)
@@ -153,13 +206,18 @@ class MainWindow(QMainWindow):
         export_menu.addAction("TXT…", self.export_txt)
         export_menu.addAction("Audio (MP3)…", self.save_audio_action)
         menu.addSeparator()
+        # carry the checked states over when the menu is rebuilt (theme change)
+        show_source = getattr(self, "action_show_source", None)
+        show_created = getattr(self, "action_show_created", None)
         self.action_show_source = QAction("Show Source column", self, checkable=True)
+        self.action_show_source.setChecked(show_source.isChecked() if show_source else False)
         self.action_show_source.toggled.connect(self.toggle_source_column)
         menu.addAction(self.action_show_source)
         self.action_show_created = QAction("Show Created At column", self, checkable=True)
+        self.action_show_created.setChecked(show_created.isChecked() if show_created else False)
         self.action_show_created.toggled.connect(self.toggle_created_column)
         menu.addAction(self.action_show_created)
-        menu.addAction(self._icon("rows"), "Show first N rows…", self.prompt_row_limit)
+        menu.addAction(self._icon("rows"), "Max words…", self.prompt_row_limit)
         menu.addSeparator()
         menu.addAction("About", self.show_about)
         menu.addAction(self._icon("x"), "Quit", self.quit_app)
@@ -179,7 +237,7 @@ class MainWindow(QMainWindow):
         sb.setSpacing(2)
 
         self.menu_btn = QPushButton()
-        self.menu_btn.setIcon(self._icon("menu", "text_dim"))
+        self._set_icon(self.menu_btn, "menu", "text_dim")
         self.menu_btn.setIconSize(QSize(20, 20))
         self.menu_btn.setToolTip("Menu")
         self.menu_btn.setCursor(Qt.PointingHandCursor)
@@ -191,7 +249,7 @@ class MainWindow(QMainWindow):
 
         def nav_button(icon_name, tooltip, slot, checked=False):
             btn = QPushButton()
-            btn.setIcon(self._icon(icon_name, "text" if checked else "text_dim"))
+            self._set_icon(btn, icon_name, "text" if checked else "text_dim")
             btn.setIconSize(QSize(21, 21))
             btn.setToolTip(tooltip)
             btn.setCursor(Qt.PointingHandCursor)
@@ -243,12 +301,13 @@ class MainWindow(QMainWindow):
         self.search_box.setMinimumWidth(320)
         self.search_box.setMaximumWidth(560)
         self.search_box.textChanged.connect(self.on_search_changed)
-        self.search_box.addAction(self._icon("search", "text_dim", 16),
-                                  QLineEdit.LeadingPosition)
+        search_icon_action = self.search_box.addAction(
+            self._icon("search", "text_dim", 16), QLineEdit.LeadingPosition)
+        self._themed_icons.append((search_icon_action, "search", "text_dim", 16))
         h.addWidget(self.search_box, 2)
 
         self.search_scope_btn = QPushButton(objectName="iconButton")
-        self.search_scope_btn.setIcon(self._icon("filter", "text_dim"))
+        self._set_icon(self.search_scope_btn, "filter", "text_dim")
         self.search_scope_btn.setIconSize(QSize(18, 18))
         self.search_scope_btn.setToolTip("Search scope")
         self.search_scope_btn.setCursor(Qt.PointingHandCursor)
@@ -257,7 +316,7 @@ class MainWindow(QMainWindow):
 
         if self.sync_enabled:
             self.sync_button = QPushButton(objectName="iconButton")
-            self.sync_button.setIcon(self._icon("cloud", "text_dim"))
+            self._set_icon(self.sync_button, "cloud", "text_dim")
             self.sync_button.setIconSize(QSize(19, 19))
             self.sync_button.setToolTip("Cloud sync: idle")
             self.sync_button.setCursor(Qt.PointingHandCursor)
@@ -266,8 +325,8 @@ class MainWindow(QMainWindow):
         else:
             self.sync_button = None
 
-        self.add_button = QPushButton("  Add Word", objectName="primaryButton")
-        self.add_button.setIcon(icons.icon("plus", "#ffffff"))
+        self.add_button = QPushButton("  Add Word", objectName="tonalButton")
+        self._set_icon(self.add_button, "plus", "accent_text")
         self.add_button.setIconSize(QSize(17, 17))
         self.add_button.setCursor(Qt.PointingHandCursor)
         self.add_button.clicked.connect(self.open_add_word)
@@ -288,58 +347,38 @@ class MainWindow(QMainWindow):
         f.setContentsMargins(16, 12, 16, 6)
         f.setSpacing(8)
 
-        self.lang1_combo = QComboBox()
-        self.lang1_combo.setMinimumWidth(140)
-        self.lang1_combo.currentTextChanged.connect(self.on_filters_changed)
-        f.addWidget(self.lang1_combo)
-
-        self.lang2_combo = QComboBox()
-        self.lang2_combo.setMinimumWidth(140)
-        self.lang2_combo.currentTextChanged.connect(self.on_filters_changed)
-        f.addWidget(self.lang2_combo)
-
-        self.status_combo = QComboBox()
-        self.status_combo.setMinimumWidth(125)
-        self.status_combo.currentTextChanged.connect(self.on_filters_changed)
-        f.addWidget(self.status_combo)
-
         self.tag_combo = QComboBox()
         self.tag_combo.setMinimumWidth(125)
         self.tag_combo.currentTextChanged.connect(self.on_filters_changed)
         f.addWidget(self.tag_combo)
 
         self.favorites_btn = QPushButton(" Favorites", objectName="chipButton")
-        self.favorites_btn.setIcon(self._icon("star", "text_dim", 16))
+        self.favorites_btn.setIcon(self._icon("star", "text_dim", 16))  # re-tinted via _on_favorites_toggled
         self.favorites_btn.setCheckable(True)
         self.favorites_btn.setCursor(Qt.PointingHandCursor)
         self.favorites_btn.toggled.connect(self._on_favorites_toggled)
         f.addWidget(self.favorites_btn)
 
-        self.limit_btn = QPushButton(" Limit rows", objectName="chipButton")
-        self.limit_btn.setIcon(self._icon("rows", "text_dim", 16))
-        self.limit_btn.setCheckable(True)
-        self.limit_btn.setCursor(Qt.PointingHandCursor)
-        self.limit_btn.clicked.connect(self.prompt_row_limit)
-        f.addWidget(self.limit_btn)
-
         f.addStretch(1)
-        root.addWidget(filters)
+        self.filter_row = filters
 
-        # ---------- contextual action bar (visible when rows selected) ----------
+        # ---------- contextual actions (right side of the filter row) ----------
+        # The row is fixed-height and wide enough for chips + actions even at
+        # the minimum window width, so showing the bar never moves anything.
         self.action_bar = QWidget(objectName="ActionBar")
         ab = QHBoxLayout(self.action_bar)
-        ab.setContentsMargins(12, 4, 12, 4)
+        ab.setContentsMargins(10, 0, 10, 0)
         ab.setSpacing(2)
 
         self.selection_label = QLabel("")
         ab.addWidget(self.selection_label)
-        ab.addSpacing(10)
+        ab.addSpacing(8)
 
         def action_button(icon_name, text, tip, slot):
-            btn = QPushButton(f" {text}")
-            btn.setIcon(self._icon(icon_name, "text", 17))
+            btn = QPushButton()
+            self._set_icon(btn, icon_name, "text", 17)
             btn.setIconSize(QSize(17, 17))
-            btn.setToolTip(tip)
+            btn.setToolTip(f"{text} — {tip}")
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(slot)
             ab.addWidget(btn)
@@ -354,21 +393,19 @@ class MainWindow(QMainWindow):
         action_button("copy", "Copy", "Copy words", self.show_copy_menu)
         action_button("sparkles", "Text", "Generate text from selection",
                       self.generate_text_action)
-        ab.addStretch(1)
-        delete_btn = QPushButton(" Delete")
-        delete_btn.setIcon(self._icon("trash", "danger", 17))
+        ab.addSpacing(6)
+        delete_btn = QPushButton()
+        self._set_icon(delete_btn, "trash", "danger", 17)
+        delete_btn.setIconSize(QSize(17, 17))
         delete_btn.setToolTip("Delete selected (Del)")
         delete_btn.setCursor(Qt.PointingHandCursor)
         delete_btn.clicked.connect(self.delete_rows)
         ab.addWidget(delete_btn)
 
-        action_wrap = QWidget()
-        aw = QHBoxLayout(action_wrap)
-        aw.setContentsMargins(16, 2, 16, 6)
-        aw.addWidget(self.action_bar)
-        self.action_bar_wrap = action_wrap
-        self.action_bar_wrap.setVisible(False)
-        root.addWidget(action_wrap)
+        self.action_bar.setVisible(False)
+        f.addWidget(self.action_bar)
+        self._lock_filter_row_height()
+        root.addWidget(filters)
 
         # ---------- table ----------
         table_wrap = QWidget()
@@ -376,7 +413,7 @@ class MainWindow(QMainWindow):
         tw.setContentsMargins(16, 0, 16, 8)
 
         self.model = WordTableModel(self.colors, self)
-        self.table = QTableView()
+        self.table = WordTableView()
         self.table.setModel(self.model)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -400,12 +437,44 @@ class MainWindow(QMainWindow):
         table_header.setSectionResizeMode(QHeaderView.Interactive)
         table_header.setStretchLastSection(False)
         self.table.setColumnHidden(COL_ID, True)
+        # column widths must fit the header labels at the active font
+        # scaling; QSS renders header sections at font-weight 600
+        table_header.ensurePolished()
+        header_font = QFont(table_header.font())
+        header_font.setWeight(QFont.DemiBold)
+        hfm = QFontMetrics(header_font)
+
+        def header_width(col, minimum):
+            # +56: room for the embedded filter combo's chevron + paddings
+            return max(minimum, hfm.horizontalAdvance(HEADERS[col]) + 56)
+
         self.table.setColumnWidth(1, 46)
-        self.table.setColumnWidth(COL_STATUS, 116)
-        self.table.setColumnWidth(COL_LANG1, 110)
-        self.table.setColumnWidth(COL_LANG2, 110)
+        self.table.setColumnWidth(COL_STATUS, header_width(COL_STATUS, 116))
+        self.table.setColumnWidth(COL_LANG1, header_width(COL_LANG1, 110))
+        self.table.setColumnWidth(COL_LANG2, header_width(COL_LANG2, 110))
         self.table.setColumnHidden(COL_SOURCE, True)
         self.table.setColumnHidden(COL_CREATED, True)
+
+        # ---------- filter combos embedded in the header sections ----------
+        self._header_filters = {}
+        for col, placeholder in ((COL_STATUS, "Status"), (COL_LANG1, "Language"),
+                                 (COL_LANG2, "Translation")):
+            combo = _HeaderFilterCombo(table_header)
+            combo.setObjectName("headerFilter")
+            combo.setCursor(Qt.PointingHandCursor)
+            combo.addItem(placeholder)
+            combo.view().setMinimumWidth(170)
+            combo.currentTextChanged.connect(self.on_filters_changed)
+            self.model.set_header_text(col, "")
+            self._header_filters[col] = combo
+        self.status_combo = self._header_filters[COL_STATUS]
+        self.lang1_combo = self._header_filters[COL_LANG1]
+        self.lang2_combo = self._header_filters[COL_LANG2]
+
+        table_header.sectionResized.connect(self._position_header_filters)
+        table_header.geometriesChanged.connect(self._position_header_filters)
+        self.table.horizontalScrollBar().valueChanged.connect(self._position_header_filters)
+        QTimer.singleShot(0, self._position_header_filters)
 
         # Refitting the word columns repaints the whole viewport, which is
         # too slow to do on every resize tick — throttle to ~12 fps and
@@ -440,6 +509,21 @@ class MainWindow(QMainWindow):
         outer.addWidget(content, 1)
         self.setCentralWidget(central)
 
+    def _position_header_filters(self, *_):
+        header = self.table.horizontalHeader()
+        needed = max(c.sizeHint().height() for c in self._header_filters.values()) + 4
+        if header.minimumHeight() < needed:
+            header.setMinimumHeight(needed)
+        for col, combo in self._header_filters.items():
+            if self.table.isColumnHidden(col):
+                combo.hide()
+                continue
+            x = header.sectionViewportPosition(col)
+            w = header.sectionSize(col)
+            ch = combo.sizeHint().height()
+            combo.setGeometry(x + 2, (header.height() - ch) // 2, w - 4, ch)
+            combo.show()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if not hasattr(self, '_col_fit_timer'):
@@ -463,10 +547,19 @@ class MainWindow(QMainWindow):
         self.table.setColumnWidth(COL_WORD1, available // 2)
         self.table.setColumnWidth(COL_WORD2, available - available // 2)
 
+    def _lock_filter_row_height(self):
+        """Fix the filter row height so swapping chips/actions can't shift
+        the table; recompute after theme/scaling changes."""
+        chips = (self.tag_combo, self.favorites_btn)
+        row_h = max(w.sizeHint().height() for w in chips)
+        self.action_bar.setMaximumHeight(row_h)
+        margins = self.filter_row.layout().contentsMargins()
+        self.filter_row.setFixedHeight(row_h + margins.top() + margins.bottom())
+
     def _on_selection_changed(self, *_):
         count = len(self.table.selectionModel().selectedRows())
-        self.action_bar_wrap.setVisible(count > 0)
         self.selection_label.setText(f"{count} selected")
+        self.action_bar.setVisible(count > 0)
 
     def _on_favorites_toggled(self, checked):
         self.favorites_btn.setIcon(
@@ -662,7 +755,10 @@ class MainWindow(QMainWindow):
         self.model.set_dataframe(filtered)
 
         total = len(self.df)
-        self.words_label.setText(f"Words: {len(filtered)}/{total}")
+        words_text = f"Words: {len(filtered)}/{total}"
+        if wf.row_limit is not None:
+            words_text += f" (showing first {wf.row_limit})"
+        self.words_label.setText(words_text)
 
         for combo, active in [(self.lang1_combo, wf.lang1), (self.lang2_combo, wf.lang2),
                               (self.status_combo, wf.status), (self.tag_combo, wf.selected_tag)]:
@@ -670,8 +766,6 @@ class MainWindow(QMainWindow):
             combo.style().unpolish(combo)
             combo.style().polish(combo)
 
-        self.limit_btn.setChecked(wf.row_limit is not None)
-        self.limit_btn.setText(f" First {wf.row_limit} rows" if wf.row_limit else " Limit rows")
 
     def toggle_source_column(self, checked):
         self.table.setColumnHidden(COL_SOURCE, not checked)
@@ -683,8 +777,9 @@ class MainWindow(QMainWindow):
 
     def prompt_row_limit(self):
         current = self.word_filter.row_limit or 0
-        value, ok = QInputDialog.getInt(self, "Limit Rows",
-                                        "Show first N rows (0 = no limit):", current, 0, 1000000)
+        value, ok = QInputDialog.getInt(self, "Max Words",
+                                        "Show only the first N words (0 = show all):",
+                                        current, 0, 1000000)
         if ok:
             self.word_filter.row_limit = value if value > 0 else None
             self.refresh_display()
@@ -898,7 +993,6 @@ class MainWindow(QMainWindow):
         languages = [(r.get('Language1', ''), r.get('Language2', '')) for r in records]
 
         self.is_reading_active = True
-        self.read_button.setText(" Stop")
         self.read_button.setIcon(self._icon("stop", "danger", 17))
         self.read_button.setToolTip("Stop reading")
 
@@ -906,9 +1000,8 @@ class MainWindow(QMainWindow):
 
     def _reading_finished(self):
         self.is_reading_active = False
-        self.read_button.setText(" Read")
         self.read_button.setIcon(self._icon("volume", "text", 17))
-        self.read_button.setToolTip("Read selected words aloud")
+        self.read_button.setToolTip("Read — Read selected words aloud")
 
     def save_audio_action(self):
         records = self.selected_records()
@@ -1174,6 +1267,8 @@ class MainWindow(QMainWindow):
                 self.settings.get("appearance_mode", "System"),
                 get_float(self.settings, "widget_scaling", 1.0))
             self.model.set_colors(self.colors)
+            self._refresh_icons()
+            self._lock_filter_row_height()
             self._apply_table_density()
             self.refresh_display()
             show_toast(self, "Settings", "Settings saved.", "success")
@@ -1181,10 +1276,13 @@ class MainWindow(QMainWindow):
     def open_log_window(self):
         from app.ui.dialogs.log_window import LogWindow
         existing = self._open_dialogs.get("log")
-        if existing is not None and existing.isVisible():
-            existing.raise_()
-            return
-        win = LogWindow(self)
+        try:
+            if existing is not None and existing.isVisible():
+                existing.raise_()
+                return
+        except RuntimeError:
+            pass  # WA_DeleteOnClose: the C++ widget is already gone
+        win = LogWindow(self, follow_app_log=True)
         self._open_dialogs["log"] = win
         win.show()
 
@@ -1192,6 +1290,6 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, f"About {APP_NAME}",
             f"<h3>{APP_NAME}</h3>"
-            f"<p>Version {APP_VERSION} — modern PySide6 edition</p>"
-            "<p>Personal dictionary with cloud sync, AI definitions, "
-            "translations, text-to-speech and rich export options.</p>")
+            f"<p>Version {APP_VERSION} &nbsp;·&nbsp; Build {BUILD_NUMBER}</p>"
+            "<p>Your personal vocabulary companion with cloud sync, "
+            "AI definitions, translations, text-to-speech and export options.</p>")
