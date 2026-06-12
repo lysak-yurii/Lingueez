@@ -28,6 +28,7 @@ class WordPopup(QFrame):
     """Anchored translation popover with add-to-vocabulary actions."""
 
     word_saved = Signal()  # a word was added — let the main window refresh
+    closed = Signal()      # hidden — the host clears the click highlight
 
     MAX_LABEL_CHARS = 60
 
@@ -108,6 +109,7 @@ class WordPopup(QFrame):
     def hideEvent(self, event):
         self._request += 1  # orphan any in-flight worker results
         super().hideEvent(event)
+        self.closed.emit()
 
     def _target(self):
         target = str(load_settings().get("reader_translate_target", "English"))

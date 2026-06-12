@@ -1609,14 +1609,16 @@ class MainWindow(QMainWindow):
         from app.ui.dialogs.base import FramelessDialog
         dialog = FramelessDialog(self, title=f"About {APP_NAME}")
         dialog.setMinimumWidth(420)
+        repo = "https://github.com/lysak-yurii/dictionary-desktop-app"
         body = QLabel(
             f"<h3>{APP_NAME}</h3>"
             f"<p>Version {APP_VERSION} &nbsp;·&nbsp; Build {BUILD_NUMBER}</p>"
             "<p>Your personal vocabulary companion with cloud sync, "
             "AI definitions, translations, text-to-speech and export options.</p>"
-            "<p>Author: Yurii Lysak<br>"
-            "<a href='https://github.com/lysak-yurii/dictionary-desktop-app'>"
-            "github.com/lysak-yurii/dictionary-desktop-app</a></p>")
+            f"<p>Author: Yurii Lysak &nbsp;·&nbsp; "
+            f"<a href='{repo}'>GitHub</a></p>"
+            f"<p>Found a bug or have an idea? "
+            f"<a href='{repo}/issues'>Report an issue</a>.</p>")
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextBrowserInteraction)
         body.setOpenExternalLinks(True)

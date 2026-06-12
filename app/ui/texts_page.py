@@ -8,10 +8,10 @@ save and delete.
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QTextCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+    QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMessageBox, QPushButton, QSplitter, QStackedLayout, QStyle,
     QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
@@ -126,7 +126,13 @@ class TextsPage(QWidget):
         self._sentence_range = None  # highlight ranges (absolute char offsets)
         self._word_range = None
         self._hover_range = None
-        self._press_pos = None       # click-to-seek gesture tracking
+        self._popup_range = None     # word the translation popup belongs to
+        self._press_pos = None       # word-click gesture tracking
+        self._pending_click = None   # viewport pos of a click awaiting the
+        self._click_timer = QTimer(self)  # double-click window while reading
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(QApplication.doubleClickInterval())
+        self._click_timer.timeout.connect(self._on_deferred_click)
 
         self._build_ui()
 
@@ -145,6 +151,7 @@ class TextsPage(QWidget):
 
         self.word_popup = WordPopup(self._colors, self.db_adapter, parent=self)
         self.word_popup.word_saved.connect(self.vocab_changed.emit)
+        self.word_popup.closed.connect(self._on_popup_closed)
 
     # ------------------------------------------------------------------ UI
 
@@ -594,6 +601,8 @@ class TextsPage(QWidget):
         self.body.viewport().setCursor(
             Qt.IBeamCursor if editing else Qt.ArrowCursor)
         self._set_hover(None)
+        self._click_timer.stop()
+        self._pending_click = None
         if editing:
             self.body.setFocus()
 
@@ -708,6 +717,8 @@ class TextsPage(QWidget):
         if not self.is_reading:
             return
         self.is_reading = False
+        self._click_timer.stop()
+        self._pending_click = None
         self.reader_bar.setVisible(False)
         self._sentence_range = None
         self._word_range = None
@@ -755,8 +766,11 @@ class TextsPage(QWidget):
         selections = []
         if self._sentence_range:
             selections.append(self._selection(*self._sentence_range, self._tint(22)))
-        if self._hover_range and self._hover_range != self._word_range:
+        if self._hover_range and self._hover_range not in (
+                self._word_range, self._popup_range):
             selections.append(self._selection(*self._hover_range, self._tint(55)))
+        if self._popup_range and self._popup_range != self._word_range:
+            selections.append(self._selection(*self._popup_range, self._tint(55)))
         if self._word_range:
             selections.append(self._selection(*self._word_range, self._tint(95)))
         self.body.setExtraSelections(selections)
@@ -776,11 +790,12 @@ class TextsPage(QWidget):
     # --------------------------------------------------- word interactions
 
     def eventFilter(self, obj, event):
-        # Read-mode mouse behavior: a plain click on a word seeks playback
-        # while reading, or pronounces the word when idle; drag-selection
-        # (for copying) still works because a release after a drag or with
-        # an active selection is left alone. The hovered word gets a subtle
-        # highlight.
+        # Read-mode mouse behavior: a plain click on a word pronounces it
+        # and opens the translation popup. While reading, that click is held
+        # back for one double-click interval so a double click can seek
+        # playback to the word instead. Drag-selection (for copying) still
+        # works because a release after a drag or with an active selection
+        # is left alone. The hovered word gets a subtle highlight.
         if obj is self.body.viewport():
             etype = event.type()
             if etype == QEvent.MouseMove:
@@ -791,6 +806,13 @@ class TextsPage(QWidget):
             elif self.body.isReadOnly() and etype == QEvent.MouseButtonPress \
                     and event.button() == Qt.LeftButton:
                 self._press_pos = event.position().toPoint()
+            elif self.body.isReadOnly() and etype == QEvent.MouseButtonDblClick \
+                    and event.button() == Qt.LeftButton and self.is_reading:
+                self._click_timer.stop()
+                self._pending_click = None
+                self.reader.seek_to_char(self.body.cursorForPosition(
+                    event.position().toPoint()).position())
+                return True  # also keeps QTextEdit from selecting the word
             elif self.body.isReadOnly() and etype == QEvent.MouseButtonRelease \
                     and event.button() == Qt.LeftButton:
                 press, self._press_pos = self._press_pos, None
@@ -798,17 +820,30 @@ class TextsPage(QWidget):
                 if press is not None and (pos - press).manhattanLength() < 8 \
                         and not self.body.textCursor().hasSelection():
                     if self.is_reading:
-                        self.reader.seek_to_char(
-                            self.body.cursorForPosition(pos).position())
+                        # wait out the double-click window: a second click
+                        # means "jump here", not "translate this"
+                        self._pending_click = pos
+                        self._click_timer.start()
                         return True
-                    word_range = self._word_at_point(pos)
-                    if word_range:
-                        start, end = word_range
-                        word = self.body.toPlainText()[start:end]
-                        self._pronounce(word, self.language_combo.currentText())
-                        self._show_word_popup(word, start, end)
+                    if self._popup_word_at(pos):
                         return True
         return super().eventFilter(obj, event)
+
+    def _on_deferred_click(self):
+        pos, self._pending_click = self._pending_click, None
+        if pos is not None and self.body.isReadOnly():
+            self._popup_word_at(pos)
+
+    def _popup_word_at(self, pos):
+        """Pronounce the word at *pos* and open its translation popup."""
+        word_range = self._word_at_point(pos)
+        if not word_range:
+            return False
+        start, end = word_range
+        word = self.body.toPlainText()[start:end]
+        self._pronounce(word, self.language_combo.currentText())
+        self._show_word_popup(word, start, end)
+        return True
 
     def _word_at_point(self, pos):
         """(start, end) of the word under the mouse, or None.
@@ -840,8 +875,15 @@ class TextsPage(QWidget):
         rect = rect.united(self.body.cursorRect(cursor))
         anchor = QRect(self.body.viewport().mapToGlobal(rect.topLeft()),
                        rect.size())
+        self._popup_range = (start, end)  # keep the word marked while open
+        self._apply_highlight()
         self.word_popup.show_for(word, self.language_combo.currentText(),
                                  sentence, anchor)
+
+    def _on_popup_closed(self):
+        if self._popup_range:
+            self._popup_range = None
+            self._apply_highlight()
 
     def _set_hover(self, word_range):
         if word_range != self._hover_range:
@@ -850,7 +892,7 @@ class TextsPage(QWidget):
         if not self.body.isReadOnly():
             shape = Qt.IBeamCursor
         elif word_range:
-            shape = Qt.PointingHandCursor  # click seeks (reading) / pronounces
+            shape = Qt.PointingHandCursor  # click translates; dbl-click seeks
         else:
             shape = Qt.ArrowCursor
         self.body.viewport().setCursor(shape)

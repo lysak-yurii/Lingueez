@@ -575,6 +575,8 @@ def apply_theme(app: QApplication, mode="System", scaling=1.0):
     pal.setColor(QPalette.ToolTipBase, QColor(c['surface_alt']))
     pal.setColor(QPalette.ToolTipText, QColor(c['text']))
     pal.setColor(QPalette.PlaceholderText, QColor(c['text_dim']))
+    pal.setColor(QPalette.Link, QColor(c['accent']))
+    pal.setColor(QPalette.LinkVisited, QColor(c['accent']))
     app.setPalette(pal)
 
     from app.ui import icons
