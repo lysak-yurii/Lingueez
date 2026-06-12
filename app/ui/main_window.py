@@ -12,7 +12,7 @@ from PySide6.QtGui import (
     QAction, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog,
+    QApplication, QComboBox, QFileDialog, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QStatusBar,
     QTableView, QVBoxLayout, QWidget, QWidgetAction, QCheckBox, QAbstractItemView,
 )
@@ -376,9 +376,10 @@ class MainWindow(QMainWindow):
         else:
             self.sync_button = None
 
-        self.add_button = QPushButton("  Add Word", objectName="tonalButton")
-        self._set_icon(self.add_button, "plus", "accent_text")
-        self.add_button.setIconSize(QSize(17, 17))
+        self.add_button = QPushButton(objectName="iconButton")
+        self._set_icon(self.add_button, "plus", "text_dim")
+        self.add_button.setIconSize(QSize(19, 19))
+        self.add_button.setToolTip("Add word")
         self.add_button.setCursor(Qt.PointingHandCursor)
         self.add_button.clicked.connect(self.open_add_word)
         h.addWidget(self.add_button)
@@ -979,10 +980,11 @@ class MainWindow(QMainWindow):
         self._fit_word_columns()
 
     def prompt_row_limit(self):
+        from app.ui.dialogs.base import ask_int
         current = self.word_filter.row_limit or 0
-        value, ok = QInputDialog.getInt(self, "Max Words",
-                                        "Show only the first N words (0 = show all):",
-                                        current, 0, 1000000)
+        value, ok = ask_int(self, "Max Words",
+                            "Show only the first N words (0 = show all):",
+                            current, 0, 1000000)
         if ok:
             self.word_filter.row_limit = value if value > 0 else None
             self.refresh_display()
@@ -1106,8 +1108,9 @@ class MainWindow(QMainWindow):
         records = self._require_selection("change status")
         if not records:
             return
+        from app.ui.dialogs.base import ask_item
         statuses = PREDEFINED_STATUSES
-        status, ok = QInputDialog.getItem(self, "Change Status", "New status:", statuses, 0, False)
+        status, ok = ask_item(self, "Change Status", "New status:", statuses, 0, False)
         if not ok:
             return
         for record in records:
@@ -1603,9 +1606,27 @@ class MainWindow(QMainWindow):
         win.show()
 
     def show_about(self):
-        QMessageBox.about(
-            self, f"About {APP_NAME}",
+        from app.ui.dialogs.base import FramelessDialog
+        dialog = FramelessDialog(self, title=f"About {APP_NAME}")
+        dialog.setMinimumWidth(420)
+        body = QLabel(
             f"<h3>{APP_NAME}</h3>"
             f"<p>Version {APP_VERSION} &nbsp;·&nbsp; Build {BUILD_NUMBER}</p>"
             "<p>Your personal vocabulary companion with cloud sync, "
-            "AI definitions, translations, text-to-speech and export options.</p>")
+            "AI definitions, translations, text-to-speech and export options.</p>"
+            "<p>Author: Yurii Lysak<br>"
+            "<a href='https://github.com/lysak-yurii/dictionary-desktop-app'>"
+            "github.com/lysak-yurii/dictionary-desktop-app</a></p>")
+        body.setWordWrap(True)
+        body.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        body.setOpenExternalLinks(True)
+        dialog.content_layout.addWidget(body)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        ok = QPushButton("OK", objectName="primaryButton")
+        ok.setCursor(Qt.PointingHandCursor)
+        ok.setDefault(True)
+        ok.clicked.connect(dialog.accept)
+        row.addWidget(ok)
+        dialog.content_layout.addLayout(row)
+        dialog.exec()

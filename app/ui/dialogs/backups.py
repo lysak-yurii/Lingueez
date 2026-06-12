@@ -5,11 +5,12 @@ import shutil
 import sqlite3
 from datetime import datetime
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton,
-    QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QAbstractItemView, QHBoxLayout, QLabel, QMessageBox, QPushButton,
+    QTableWidget, QTableWidgetItem,
 )
+
+from app.ui.dialogs.base import FramelessDialog
 
 BACKUP_DIR = 'backups'
 DB_PATH = 'dictionary.db'
@@ -34,14 +35,13 @@ def _backup_counts(path):
     return counts
 
 
-class BackupsDialog(QDialog):
+class BackupsDialog(FramelessDialog):
     def __init__(self, parent, on_restored=None):
-        super().__init__(parent)
+        super().__init__(parent, title="Backups")
         self.on_restored = on_restored
-        self.setWindowTitle("Backups")
         self.setMinimumSize(640, 440)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(16, 16, 16, 12)
 
         hint = QLabel("A backup is created automatically after every change. "

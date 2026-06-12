@@ -11,11 +11,11 @@ import re
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit,
-    QVBoxLayout,
+    QHBoxLayout, QLabel, QMessageBox, QPushButton, QTextEdit,
 )
 
 from app.core import ai
+from app.ui.dialogs.base import FramelessDialog
 from app.ui.workers import run_in_thread
 
 
@@ -31,11 +31,11 @@ def markup_to_html(text):
     return out
 
 
-class DefinitionDialog(QDialog):
+class DefinitionDialog(FramelessDialog):
     definition_changed = Signal()
 
     def __init__(self, parent, record, db_adapter):
-        super().__init__(parent)
+        super().__init__(parent, title=f"Definition — {record.get('Word1', '')}")
         self.record = record
         self.db_adapter = db_adapter
         self.word_id = int(record["ID"])
@@ -43,11 +43,10 @@ class DefinitionDialog(QDialog):
         self.editing = False
         self.ai_label = ai.provider_label()
 
-        self.setWindowTitle(f"Definition — {record.get('Word1', '')}")
         self.setMinimumSize(620, 480)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(18, 18, 18, 14)
         layout.setSpacing(10)
 

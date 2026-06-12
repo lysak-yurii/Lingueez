@@ -3,22 +3,22 @@ import logging
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QVBoxLayout,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMessageBox, QPushButton,
 )
 
 from app.core import db as dbq
+from app.ui.dialogs.base import FramelessDialog
 
 
-class TagDialog(QDialog):
+class TagDialog(FramelessDialog):
     def __init__(self, parent, word_ids, db_adapter):
-        super().__init__(parent)
+        super().__init__(parent, title=f"Tags — {len(word_ids)} word(s)")
         self.word_ids = word_ids
         self.db_adapter = db_adapter
-        self.setWindowTitle(f"Tags — {len(word_ids)} word(s)")
         self.setMinimumSize(420, 460)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(18, 18, 18, 14)
         layout.setSpacing(10)
 

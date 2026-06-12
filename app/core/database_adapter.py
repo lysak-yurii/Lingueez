@@ -947,11 +947,12 @@ class DatabaseAdapter:
         words = text_data.get('Words', text_data.get('words'))
         language = text_data.get('Language', text_data.get('language'))
         category = text_data.get('Category', text_data.get('category'))
-        
+        level = text_data.get('Level', text_data.get('level'))
+
         cursor.execute('''
-            INSERT INTO texts (RowNumber, Title, Text, Words, Language, Category, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-        ''', (row_number, title, text, words, language, category))
+            INSERT INTO texts (RowNumber, Title, Text, Words, Language, Category, Level, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ''', (row_number, title, text, words, language, category, level))
         
         text_id = cursor.lastrowid
         conn.commit()
@@ -993,7 +994,7 @@ class DatabaseAdapter:
         updates = []
         values = []
         
-        for key in ['RowNumber', 'Title', 'Text', 'Words', 'Language', 'Category']:
+        for key in ['RowNumber', 'Title', 'Text', 'Words', 'Language', 'Category', 'Level']:
             if key in text_data:
                 updates.append(f"{key} = ?")
                 values.append(text_data[key])
@@ -1192,17 +1193,18 @@ class DatabaseAdapter:
         words = text_data.get('Words', text_data.get('words'))
         language = text_data.get('Language', text_data.get('language'))
         category = text_data.get('Category', text_data.get('category'))
-        
+        level = text_data.get('Level', text_data.get('level'))
+
         from datetime import datetime
         created_at = text_data.get('created_at')
         if not created_at:
             created_at = datetime.now(timezone.utc).isoformat()
         edited_at = text_data.get('edited_at')
-        
+
         cursor.execute('''
-            INSERT INTO texts (ID, RowNumber, Title, Text, Words, Language, Category, created_at, edited_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (text_id, row_number, title, text, words, language, category, created_at, edited_at))
+            INSERT INTO texts (ID, RowNumber, Title, Text, Words, Language, Category, Level, created_at, edited_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (text_id, row_number, title, text, words, language, category, level, created_at, edited_at))
         
         conn.commit()
         conn.close()

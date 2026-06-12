@@ -203,9 +203,9 @@ def reset_clients():
         provider.reset()
 
 
-def _task_params(settings, provider, texts=False):
+def _task_params(settings, provider, task=""):
     """Model/prompt settings for one task, e.g. chatgpt_texts_* keys."""
-    prefix = provider.settings_prefix + ("_texts" if texts else "")
+    prefix = provider.settings_prefix + (f"_{task}" if task else "")
     return {
         "model": str(settings.get(f"{prefix}_model", "")).strip(),
         "max_tokens": get_int(settings, f"{prefix}_max_tokens", 400),
@@ -270,8 +270,34 @@ def generate_combined_text(words, language):
     """Generate (title, text) from a word list; raises AIError."""
     settings = load_settings()
     provider = get_provider(settings)
-    params = _task_params(settings, provider, texts=True)
+    params = _task_params(settings, provider, task="texts")
     prompt = _render(params.pop("template"), words=words, language=language)
+    content = provider.complete(prompt, **params)
+    return _split_title_text(content)
+
+
+def generate_topic_text(language, level, topic, length_words):
+    """Generate (title, text) for a language/level/topic; raises AIError."""
+    settings = load_settings()
+    provider = get_provider(settings)
+    params = _task_params(settings, provider, task="texts_topic")
+    prompt = _render(params.pop("template"), language=language, level=level,
+                     topic=topic, length=length_words)
+    # the configured cap is a floor — long texts need room (~3 tokens/word)
+    params["max_tokens"] = max(params["max_tokens"], int(length_words) * 3 + 200)
+    content = provider.complete(prompt, **params)
+    return _split_title_text(content)
+
+
+def adapt_text_to_level(text, language, level):
+    """Rewrite *text* for a CEFR level; returns (title, text), raises AIError."""
+    settings = load_settings()
+    provider = get_provider(settings)
+    params = _task_params(settings, provider, task="texts_adapt")
+    snippet = text.strip()[:6000]
+    prompt = _render(params.pop("template"), text=snippet,
+                     language=language, level=level)
+    params["max_tokens"] = max(params["max_tokens"], len(snippet) // 2 + 300)
     content = provider.complete(prompt, **params)
     return _split_title_text(content)
 
@@ -313,7 +339,8 @@ def update_definition_in_db(word, language1, language2, word_field, word_id):
         backup_database()
 
 
-def save_generated_text_to_db(row_number, title, text, words, language):
+def save_generated_text_to_db(row_number, title, text, words, language,
+                              level=None, category=None):
     """Returns (ok, message)."""
     try:
         db_adapter = _make_db_adapter()
@@ -323,6 +350,8 @@ def save_generated_text_to_db(row_number, title, text, words, language):
             'Text': text,
             'Words': words,
             'Language': language,
+            'Level': level,
+            'Category': category,
         })
         if result:
             backup_database()

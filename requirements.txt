@@ -18,6 +18,10 @@ openpyxl>=3.0.0
 # PDF Generation
 reportlab>=3.6.0
 
+# Text sources (article extraction, RSS feeds)
+trafilatura>=1.8.0
+feedparser>=6.0.0
+
 # Cloud Database
 supabase>=2.0.0
 

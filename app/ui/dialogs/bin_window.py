@@ -4,12 +4,13 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabWidget,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QAbstractItemView,
+    QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabWidget,
+    QTableWidget, QTableWidgetItem, QAbstractItemView,
 )
 
 from app.config import get_int, load_settings
 from app.core.supabase_client import SupabaseClient
+from app.ui.dialogs.base import FramelessDialog
 
 
 def _fmt_date(value):
@@ -21,18 +22,17 @@ def _fmt_date(value):
         return str(value)
 
 
-class BinWindow(QDialog):
+class BinWindow(FramelessDialog):
     def __init__(self, parent, db_adapter, on_restored=None):
-        super().__init__(parent)
+        super().__init__(parent, title="Bin — Deleted Items")
         self.db_adapter = db_adapter
         self.on_restored = on_restored
         self.supabase = SupabaseClient()
 
-        self.setWindowTitle("Bin — Deleted Items")
         self.setMinimumSize(760, 480)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(16, 16, 16, 12)
 
         if not self.supabase.is_connected():

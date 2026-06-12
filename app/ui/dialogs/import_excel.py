@@ -11,9 +11,9 @@ import time
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
+    QAbstractItemView, QCheckBox, QFileDialog, QHBoxLayout,
     QHeaderView, QLabel, QProgressBar, QPushButton, QTableWidget,
-    QTableWidgetItem, QTextEdit, QToolButton, QVBoxLayout,
+    QTableWidgetItem, QTextEdit, QToolButton,
 )
 
 from app.config import load_settings
@@ -22,7 +22,7 @@ from app.core.importer import (
     ACTION_ADD, ACTION_SKIP, ACTION_UPDATE, analyze_excel_import,
     apply_additions, apply_updates,
 )
-from app.ui import theme
+from app.ui.dialogs.base import FramelessDialog
 from app.ui.dialogs.log_window import LEVEL_COLORS
 from app.ui.workers import run_in_thread
 
@@ -47,22 +47,20 @@ def _cell_text(value):
     return "" if text.lower() == 'nan' else text
 
 
-class ImportReviewDialog(QDialog):
+class ImportReviewDialog(FramelessDialog):
     """Single-window import experience: analyze → review/select → apply."""
 
     _log_line = Signal(str, str)  # message, level — safe from worker threads
 
     def __init__(self, parent, db_adapter, path):
-        super().__init__(parent)
+        super().__init__(parent, title="Import from Excel")
         self.main = parent
         self.db_adapter = db_adapter
         self.path = path
-        self.colors = theme.current_colors()
         self._applying = False
         self._populating = False
         self._row_payloads = []
 
-        self.setWindowTitle("Import from Excel")
         self.setMinimumSize(860, 520)
         self.resize(1040, 660)
         self.setAttribute(Qt.WA_DeleteOnClose)
@@ -75,7 +73,7 @@ class ImportReviewDialog(QDialog):
     # ------------------------------------------------------------------ UI
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(16, 16, 16, 12)
         layout.setSpacing(10)
 

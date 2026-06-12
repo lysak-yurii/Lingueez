@@ -94,6 +94,27 @@ DEFAULTS = {
         "in the following language: {language}.Separate the title and text with a "
         "delimiter like \"\\n\\n\". And do not use any markups('**' etc.)"
     ),
+    "chatgpt_texts_topic_model": "gpt-4o-mini",
+    "chatgpt_texts_topic_max_tokens": "1200",
+    "chatgpt_texts_topic_temperature": "0.7",
+    "chatgpt_texts_topic_role": "assistant",
+    "chatgpt_texts_topic_content": (
+        "Write a text in {language} for a language learner at CEFR level {level} "
+        "about: {topic}. Length: about {length} words. Use vocabulary and grammar "
+        "appropriate for {level}. Start with a short title, then an empty line, "
+        "then the text. Do not use any markups('**' etc.)."
+    ),
+    "chatgpt_texts_adapt_model": "gpt-4o-mini",
+    "chatgpt_texts_adapt_max_tokens": "2000",
+    "chatgpt_texts_adapt_temperature": "0.5",
+    "chatgpt_texts_adapt_role": "assistant",
+    "chatgpt_texts_adapt_content": (
+        "Rewrite the following text in {language} for a language learner at CEFR "
+        "level {level}. Keep the meaning and key facts; adjust vocabulary and "
+        "sentence complexity to {level}. Start with a short title, then an empty "
+        "line, then the rewritten text. Do not use any markups('**' etc.). "
+        "Text: {text}"
+    ),
     # Gemini
     "gemini_model": "gemini-2.5-flash",
     "gemini_thinking_budget": "0",    # 0 = off, -1 = dynamic (model decides)
@@ -113,11 +134,34 @@ DEFAULTS = {
         "in the following language: {language}. Separate the title and text with a "
         "delimiter like \"\\n\\n\". And do not use any markups('**' etc.)"
     ),
+    "gemini_texts_topic_model": "gemini-2.5-flash",
+    "gemini_texts_topic_max_tokens": "1200",
+    "gemini_texts_topic_temperature": "0.7",
+    "gemini_texts_topic_content": (
+        "Write a text in {language} for a language learner at CEFR level {level} "
+        "about: {topic}. Length: about {length} words. Use vocabulary and grammar "
+        "appropriate for {level}. Start with a short title, then an empty line, "
+        "then the text. Do not use any markups('**' etc.)."
+    ),
+    "gemini_texts_adapt_model": "gemini-2.5-flash",
+    "gemini_texts_adapt_max_tokens": "2000",
+    "gemini_texts_adapt_temperature": "0.5",
+    "gemini_texts_adapt_content": (
+        "Rewrite the following text in {language} for a language learner at CEFR "
+        "level {level}. Keep the meaning and key facts; adjust vocabulary and "
+        "sentence complexity to {level}. Start with a short title, then an empty "
+        "line, then the rewritten text. Do not use any markups('**' etc.). "
+        "Text: {text}"
+    ),
     # Excel import
     "excel_import_placeholders": "(  ),'',N/A,---,None,null",
     "excel_import_skip_placeholders": "True",
     "excel_import_skip_empty": "True",
     "excel_import_normalize": "True",
+    # Text sources (Add Text dialog)
+    "rss_feeds_user": "[]",           # single-line JSON list of {name, url, language}
+    "addtext_language": "",           # last-used language in the Add Text dialog
+    "addtext_level": "",              # last-used CEFR level in the Add Text dialog
     # Sync
     "enable_sync": "False",
     "cleanup_grace_period_days": "30",

@@ -4,7 +4,7 @@ import shutil
 
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QCheckBox, QComboBox, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QKeySequenceEdit,
     QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox,
     QTabWidget, QTextEdit, QVBoxLayout, QWidget,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from app.config import get_bool, get_float, get_int, load_settings, save_settings
 from app.core import exporters
 from app.system.autostart import get_autostart_enabled, set_autostart
+from app.ui.dialogs.base import FramelessDialog
 from app.ui.widgets import ColorButton, ColumnPicker
 
 
@@ -46,15 +47,14 @@ def _scrollable(widget):
     return scroll
 
 
-class SettingsDialog(QDialog):
+class SettingsDialog(FramelessDialog):
     def __init__(self, parent):
-        super().__init__(parent)
-        self.setWindowTitle("Settings")
+        super().__init__(parent, title="Settings")
         self.setMinimumSize(720, 560)
         self.settings = load_settings()
         self.env = _read_env()
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(16, 16, 16, 12)
 
         self.tabs = QTabWidget()

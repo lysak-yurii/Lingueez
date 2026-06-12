@@ -1234,8 +1234,8 @@ class SyncManager:
                 final_edited_at = cloud_edited_at
             
             cursor.execute("""
-                UPDATE texts SET 
-                    RowNumber=?, Title=?, Words=?, Text=?, Language=?, Category=?,
+                UPDATE texts SET
+                    RowNumber=?, Title=?, Words=?, Text=?, Language=?, Category=?, Level=?,
                     created_at=?, edited_at=?
                 WHERE ID=?
             """, (
@@ -1245,6 +1245,7 @@ class SyncManager:
                 text_data.get('Text'),
                 text_data.get('Language'),
                 text_data.get('Category'),
+                text_data.get('Level'),
                 final_created_at,  # Preserve local created_at
                 final_edited_at,   # Use newer edited_at
                 text_id
@@ -1253,10 +1254,10 @@ class SyncManager:
             # Insert new
             cursor.execute("""
                 INSERT INTO texts (
-                    ID, RowNumber, Title, Words, Text, Language, Category,
+                    ID, RowNumber, Title, Words, Text, Language, Category, Level,
                     created_at, edited_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 text_id,
                 text_data.get('RowNumber'),
@@ -1265,6 +1266,7 @@ class SyncManager:
                 text_data.get('Text'),
                 text_data.get('Language'),
                 text_data.get('Category'),
+                text_data.get('Level'),
                 text_data.get('created_at'),
                 text_data.get('edited_at')
             ))
@@ -1375,6 +1377,7 @@ class SyncManager:
             'Text': text_data.get('Text'),
             'Language': text_data.get('Language'),
             'Category': text_data.get('Category'),
+            'Level': text_data.get('Level'),
             'created_at': text_data.get('created_at'),
             'edited_at': text_data.get('edited_at') or text_data.get('created_at')
         }

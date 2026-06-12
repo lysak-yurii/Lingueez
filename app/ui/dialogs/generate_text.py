@@ -3,30 +3,29 @@ import logging
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QTextEdit, QVBoxLayout,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QTextEdit,
 )
 
 from app.core import ai
+from app.ui.dialogs.base import FramelessDialog
 from app.ui.workers import run_in_thread
 
 
-class GenerateTextDialog(QDialog):
+class GenerateTextDialog(FramelessDialog):
     text_saved = Signal()
 
     def __init__(self, parent, words, language):
-        super().__init__(parent)
+        super().__init__(parent, title="Generate Text")
         self.words = words
         self.language = language
         self.generated_title = None
         self.generated_text = None
         self.ai_label = ai.provider_label()
 
-        self.setWindowTitle("Generate Text")
         self.setMinimumSize(640, 520)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(18, 18, 18, 14)
         layout.setSpacing(10)
 

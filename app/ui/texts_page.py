@@ -6,20 +6,24 @@ player (pause / sentence skips / click-to-seek / word highlighting),
 save and delete.
 """
 import logging
+from pathlib import Path
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QTextCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSplitter,
-    QStackedLayout, QStyle, QStyledItemDelegate, QTextEdit, QVBoxLayout,
-    QWidget,
+    QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QMessageBox, QPushButton, QSplitter, QStackedLayout, QStyle,
+    QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
 )
 
+from app.config import load_settings
 from app.core.audio import lang_codes, speak_word
 from app.core.backup_management import backup_database
 from app.ui import icons
 from app.ui.animations import fade_swap
+from app.ui.dialogs.add_text import AddTextDialog
+from app.ui.dialogs.base import ask_item
 from app.ui.dialogs.definition import markup_to_html
 from app.ui.reader import ReaderPlayer, ReaderToolbar, _sentence_spans
 from app.ui.toast import show_toast
@@ -34,6 +38,9 @@ SORT_NEWEST = "Newest first"
 SORT_OLDEST = "Oldest first"
 SORT_TITLE = "Title A–Z"
 ALL_LANGUAGES = "All languages"
+ALL_LEVELS = "All levels"
+ALL_TOPICS = "All topics"
+CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
 
 
 class TextCardDelegate(QStyledItemDelegate):
@@ -165,6 +172,19 @@ class TextsPage(QWidget):
         ll.setContentsMargins(0, 0, 0, 0)
         ll.setSpacing(8)
 
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(4)
+        toolbar.addWidget(self._icon_button(
+            "plus", "text", "New text (write or paste)",
+            lambda: self._open_add_dialog(0)))
+        toolbar.addWidget(self._icon_button(
+            "globe", "text", "Get text from the Internet (AI / Wikipedia / URL / RSS)",
+            lambda: self._open_add_dialog(1)))
+        toolbar.addWidget(self._icon_button(
+            "download", "text", "Import .txt file(s)", self._import_txt_files))
+        toolbar.addStretch(1)
+        ll.addLayout(toolbar)
+
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
         self.lang_filter = QComboBox()
@@ -177,6 +197,18 @@ class TextsPage(QWidget):
         self.sort_combo.currentTextChanged.connect(self._refresh_list)
         filter_row.addWidget(self.sort_combo)
         ll.addLayout(filter_row)
+
+        filter_row2 = QHBoxLayout()
+        filter_row2.setSpacing(8)
+        self.level_filter = QComboBox()
+        self.level_filter.addItem(ALL_LEVELS)
+        self.level_filter.currentTextChanged.connect(self._refresh_list)
+        filter_row2.addWidget(self.level_filter, 1)
+        self.topic_filter = QComboBox()
+        self.topic_filter.addItem(ALL_TOPICS)
+        self.topic_filter.currentTextChanged.connect(self._refresh_list)
+        filter_row2.addWidget(self.topic_filter, 1)
+        ll.addLayout(filter_row2)
 
         self.listing = QListWidget(objectName="TextsList")
         self.listing.setMouseTracking(True)
@@ -235,6 +267,16 @@ class TextsPage(QWidget):
         self.language_combo.addItems(sorted(lang_codes.keys()))
         self.language_combo.editTextChanged.connect(self._mark_dirty)
         meta.addWidget(self.language_combo)
+        self.level_combo = QComboBox()
+        self.level_combo.addItems([""] + CEFR_LEVELS)
+        self.level_combo.setToolTip("Level")
+        self.level_combo.currentTextChanged.connect(self._mark_dirty)
+        meta.addWidget(self.level_combo)
+        self.topic_edit = QLineEdit()
+        self.topic_edit.setPlaceholderText("Topic")
+        self.topic_edit.setMaximumWidth(160)
+        self.topic_edit.textEdited.connect(self._mark_dirty)
+        meta.addWidget(self.topic_edit)
         self.created_label = QLabel("", objectName="dimLabel")
         meta.addWidget(self.created_label)
         meta.addStretch(1)
@@ -318,18 +360,27 @@ class TextsPage(QWidget):
             self.texts = []
         self._loaded_once = True
 
-        languages = sorted({str(t.get('Language') or '').strip()
-                            for t in self.texts if str(t.get('Language') or '').strip()})
-        selected = self.lang_filter.currentText()
-        self.lang_filter.blockSignals(True)
-        self.lang_filter.clear()
-        self.lang_filter.addItem(ALL_LANGUAGES)
-        self.lang_filter.addItems(languages)
-        if selected and self.lang_filter.findText(selected) >= 0:
-            self.lang_filter.setCurrentText(selected)
-        self.lang_filter.blockSignals(False)
+        self._repopulate_filter(self.lang_filter, ALL_LANGUAGES, 'Language')
+        self._repopulate_filter(self.level_filter, ALL_LEVELS, 'Level',
+                                sort_key=lambda v: (CEFR_LEVELS.index(v)
+                                                    if v in CEFR_LEVELS else len(CEFR_LEVELS), v))
+        self._repopulate_filter(self.topic_filter, ALL_TOPICS, 'Category')
 
         self._refresh_list(preserve_id=preserve_id)
+
+    def _repopulate_filter(self, combo, all_label, field, sort_key=None):
+        """Rebuild a filter combo from distinct values, keeping the selection."""
+        values = sorted({str(t.get(field) or '').strip()
+                         for t in self.texts if str(t.get(field) or '').strip()},
+                        key=sort_key)
+        selected = combo.currentText()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(all_label)
+        combo.addItems(values)
+        if selected and combo.findText(selected) >= 0:
+            combo.setCurrentText(selected)
+        combo.blockSignals(False)
 
     def _refresh_list(self, *_, preserve_id=None):
         if preserve_id is None and self.current is not None:
@@ -337,9 +388,15 @@ class TextsPage(QWidget):
 
         query = self.search_query.strip().lower()
         language = self.lang_filter.currentText()
+        level = self.level_filter.currentText()
+        topic = self.topic_filter.currentText()
         items = list(self.texts)
         if language and language != ALL_LANGUAGES:
             items = [t for t in items if str(t.get('Language') or '').strip() == language]
+        if level and level != ALL_LEVELS:
+            items = [t for t in items if str(t.get('Level') or '').strip() == level]
+        if topic and topic != ALL_TOPICS:
+            items = [t for t in items if str(t.get('Category') or '').strip() == topic]
         if query:
             items = [t for t in items if query in str(t.get('Title') or '').lower()
                      or query in str(t.get('Text') or '').lower()
@@ -353,9 +410,12 @@ class TextsPage(QWidget):
                        reverse=(sort != SORT_OLDEST))
         self.filtered = items
 
-        self.lang_filter.setProperty("filterActive", language not in (ALL_LANGUAGES, ""))
-        self.lang_filter.style().unpolish(self.lang_filter)
-        self.lang_filter.style().polish(self.lang_filter)
+        for combo, all_label, value in ((self.lang_filter, ALL_LANGUAGES, language),
+                                        (self.level_filter, ALL_LEVELS, level),
+                                        (self.topic_filter, ALL_TOPICS, topic)):
+            combo.setProperty("filterActive", value not in (all_label, ""))
+            combo.style().unpolish(combo)
+            combo.style().polish(combo)
 
         self.listing.blockSignals(True)
         self.listing.clear()
@@ -363,9 +423,12 @@ class TextsPage(QWidget):
         for row, text in enumerate(self.filtered):
             title = str(text.get('Title') or '').strip() or "(untitled)"
             lang = str(text.get('Language') or '').strip()
+            text_level = str(text.get('Level') or '').strip()
+            text_topic = str(text.get('Category') or '').strip()
             date = str(text.get('created_at') or '')[:10]
             item = QListWidgetItem(title)
-            item.setData(META_ROLE, " · ".join(p for p in (lang, date) if p))
+            item.setData(META_ROLE,
+                         " · ".join(p for p in (lang, text_level, text_topic, date) if p))
             item.setData(SNIPPET_ROLE, " ".join(str(text.get('Text') or '').split())[:200])
             self.listing.addItem(item)
             if preserve_id is not None and text.get('ID') == preserve_id:
@@ -383,8 +446,9 @@ class TextsPage(QWidget):
             else:
                 self.empty_title.setText("No texts yet")
                 self.empty_sub.setText(
-                    'Select words in the Words view and use the "Text" action\n'
-                    "to generate a study text from them.")
+                    "Click “+” to write or paste a text, the globe to fetch one\n"
+                    "from the Internet, or select words in the Words view and\n"
+                    'use the "Text" action to generate a study text.')
             self.reader_stack.setCurrentIndex(0)
             return
 
@@ -393,6 +457,82 @@ class TextsPage(QWidget):
         self.listing.setCurrentRow(target_row)
         if self.listing.currentRow() == target_row:
             self._on_row_changed(target_row)
+
+    # ----------------------------------------------------------- new texts
+
+    def _open_add_dialog(self, initial_tab):
+        dialog = AddTextDialog(self.window(), self.db_adapter,
+                               initial_tab=initial_tab)
+        dialog.text_saved.connect(
+            lambda text_id: self.load_texts(preserve_id=text_id))
+        dialog.show()
+
+    def _import_txt_files(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Import text files", "",
+            "Text files (*.txt);;All files (*)")
+        if not paths:
+            return
+        default = self.lang_filter.currentText()
+        if default in (ALL_LANGUAGES, ""):
+            default = load_settings().get("addtext_language") or "English"
+        languages = sorted(lang_codes.keys())
+        language, ok = ask_item(
+            self, "Import text files", "Language of the imported text(s):",
+            languages, languages.index(default) if default in languages else 0,
+            True)
+        if not ok or not language.strip():
+            return
+        language = language.strip()
+
+        def work():
+            last_id, count, errors = None, 0, []
+            for path in paths:
+                try:
+                    text = self._read_text_file(path)
+                except OSError as exc:
+                    errors.append(f"{Path(path).name}: {exc}")
+                    continue
+                result = self.db_adapter.insert_text({
+                    'RowNumber': None,
+                    'Title': Path(path).stem,
+                    'Text': text.strip(),
+                    'Words': None,
+                    'Language': language,
+                    'Level': None,
+                    'Category': None,
+                })
+                if result:
+                    last_id, count = result['ID'], count + 1
+                else:
+                    errors.append(f"{Path(path).name}: insert failed")
+            return last_id, count, errors
+
+        def done(result):
+            last_id, count, errors = result
+            if count:
+                backup_database()
+                show_toast(self.window(), "Texts",
+                           f"Imported {count} text(s).", "success")
+                self.load_texts(preserve_id=last_id)
+            if errors:
+                QMessageBox.warning(self, "Import",
+                                    "Some files could not be imported:\n"
+                                    + "\n".join(errors))
+
+        run_in_thread(work, on_result=done,
+                      on_error=lambda msg: QMessageBox.critical(
+                          self, "Import", f"Import failed:\n{msg}"))
+
+    @staticmethod
+    def _read_text_file(path):
+        # utf-8-sig also reads plain utf-8 and strips a BOM if present
+        for encoding in ("utf-8-sig", "latin-1"):
+            try:
+                return Path(path).read_text(encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+        return Path(path).read_text(encoding="utf-8", errors="replace")
 
     # -------------------------------------------------------------- reader
 
@@ -416,6 +556,9 @@ class TextsPage(QWidget):
         self._loading = True
         self.title_edit.setText(str(text.get('Title') or ""))
         self.language_combo.setCurrentText(str(text.get('Language') or "English"))
+        level = str(text.get('Level') or "").strip()
+        self.level_combo.setCurrentText(level if level in CEFR_LEVELS else "")
+        self.topic_edit.setText(str(text.get('Category') or "").strip())
         created = str(text.get('created_at') or "")[:16].replace("T", " ")
         self.created_label.setText(f"Created {created}" if created else "")
         words = str(text.get('Words') or "").strip()
@@ -466,6 +609,8 @@ class TextsPage(QWidget):
         return {
             'Title': self.title_edit.text().strip(),
             'Language': self.language_combo.currentText().strip(),
+            'Level': self.level_combo.currentText().strip(),
+            'Category': self.topic_edit.text().strip(),
             'Text': self.body.toPlainText().strip(),
         }
 

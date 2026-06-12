@@ -9,6 +9,14 @@ import sqlite3
 DB_PATH = 'dictionary.db'
 
 
+def _ensure_column(cursor, table, column, decl):
+    """Additive migration: add a column to pre-existing databases."""
+    cols = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        logging.info("Added column %s.%s", table, column)
+
+
 def initialize_database(db_path=DB_PATH):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -41,11 +49,14 @@ def initialize_database(db_path=DB_PATH):
             Text Text,
             Language TEXT,
             Category TEXT,
+            Level TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             edited_at DATETIME,
             UNIQUE(ID)
         )
     ''')
+
+    _ensure_column(cursor, 'texts', 'Level', 'TEXT')
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tags (

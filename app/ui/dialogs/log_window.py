@@ -4,8 +4,10 @@ import logging
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QPushButton, QTextEdit, QVBoxLayout,
+    QFileDialog, QHBoxLayout, QPushButton, QTextEdit,
 )
+
+from app.ui.dialogs.base import FramelessDialog
 
 LEVEL_COLORS = {
     'info': None,
@@ -48,16 +50,15 @@ class _LiveLogHandler(logging.Handler):
             pass
 
 
-class LogWindow(QDialog):
+class LogWindow(FramelessDialog):
     def __init__(self, parent, title="Log", follow_app_log=False):
-        super().__init__(parent)
-        self.setWindowTitle(title)
+        super().__init__(parent, title=title)
         self.setMinimumSize(700, 460)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setModal(False)
         self._live_handler = None
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(14, 14, 14, 12)
 
         self.text = QTextEdit()

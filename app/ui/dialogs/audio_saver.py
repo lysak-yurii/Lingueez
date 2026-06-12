@@ -2,20 +2,19 @@
 import logging
 import threading
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QProgressBar,
-    QPushButton, QVBoxLayout,
+    QFileDialog, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton,
 )
 
 from app.config import get_float, get_int, load_settings
 from app.core.audio import save_audio_file
+from app.ui.dialogs.base import FramelessDialog
 from app.ui.workers import run_in_thread
 
 
-class AudioSaverDialog(QDialog):
+class AudioSaverDialog(FramelessDialog):
     def __init__(self, parent, words, languages, initial_name):
-        super().__init__(parent)
+        super().__init__(parent, title="Save to Audio")
         self.words = words
         self.languages = languages
         self.initial_name = initial_name
@@ -23,10 +22,9 @@ class AudioSaverDialog(QDialog):
         self.temp_files = set()
         self._running = False
 
-        self.setWindowTitle("Save to Audio")
         self.setMinimumWidth(460)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setContentsMargins(20, 20, 20, 16)
         layout.setSpacing(12)
 
