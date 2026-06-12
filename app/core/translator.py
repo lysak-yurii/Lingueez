@@ -28,6 +28,29 @@ def code_to_language(code):
     return None
 
 
+def get_usage(api_key=None, api_url=None):
+    """DeepL usage for the current billing period.
+
+    Returns (character_count, character_limit). Falls back to the saved
+    settings when key/url are not given. Raises TranslationError on failure.
+    """
+    settings = load_settings()
+    api_key = api_key or settings.get("api_key", "")
+    api_url = api_url or settings.get("api_url", "https://api.deepl.com/v2/translate")
+    if not api_key or api_key == "YOUR_DEEPL_API_KEY_HERE":
+        raise TranslationError("DeepL API key is not set.")
+    usage_url = api_url.rstrip("/").rsplit("/", 1)[0] + "/usage"
+    headers = {"Authorization": f"DeepL-Auth-Key {api_key}"}
+    try:
+        response = requests.get(usage_url, headers=headers, timeout=15)
+    except requests.RequestException as exc:
+        raise TranslationError(f"Network error: {exc}") from exc
+    if response.status_code != 200:
+        raise TranslationError(f"Error {response.status_code}: {response.text}")
+    data = response.json()
+    return int(data.get("character_count", 0)), int(data.get("character_limit", 0))
+
+
 def translate(word, target_language, source_language=None):
     """Translate *word* into *target_language* (a language name).
 

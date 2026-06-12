@@ -6,15 +6,16 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialogButtonBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QKeySequenceEdit,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox,
-    QTabWidget, QTextEdit, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+    QSpinBox, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from app.config import get_bool, get_float, get_int, load_settings, save_settings
-from app.core import exporters
+from app.core import exporters, translator
 from app.system.autostart import get_autostart_enabled, set_autostart
 from app.ui.dialogs.base import FramelessDialog
 from app.ui.widgets import ColorButton, ColumnPicker
+from app.ui.workers import run_in_thread
 
 
 def _read_env():
@@ -53,6 +54,10 @@ class SettingsDialog(FramelessDialog):
         self.setMinimumSize(720, 560)
         self.settings = load_settings()
         self.env = _read_env()
+        # Hidden flag: add "show_advanced=True" to settings.cfg by hand to expose
+        # the AI prompt-template editors. Deliberately absent from DEFAULTS so the
+        # key never appears in the file on its own.
+        self.show_advanced = get_bool(self.settings, "show_advanced", False)
 
         layout = self.content_layout
         layout.setContentsMargins(16, 16, 16, 12)
@@ -153,16 +158,20 @@ class SettingsDialog(FramelessDialog):
         form.addRow(note)
         for label, widget in extra_rows:
             form.addRow(label, widget)
-        for title, task in (("Definitions", prefix), ("Generated Texts", f"{prefix}_texts")):
+        for title, task in (("Definitions", prefix),
+                            ("Generated Texts (from words)", f"{prefix}_texts"),
+                            ("Generated Texts (by topic)", f"{prefix}_texts_topic"),
+                            ("Text Adaptation (to level)", f"{prefix}_texts_adapt")):
             group = QGroupBox(title)
             g_form = QFormLayout(group)
             g_form.addRow("Model", self._line(f"{task}_model", 220))
             g_form.addRow("Max tokens", self._spin(f"{task}_max_tokens", 16, 8000, 400))
             g_form.addRow("Temperature", self._dspin(f"{task}_temperature", 0, 2, 0.5))
-            content = QTextEdit(str(self.settings.get(f"{task}_content", "")))
-            content.setMaximumHeight(90)
-            setattr(self, f"w_{task}_content", content)
-            g_form.addRow("Prompt template", content)
+            if self.show_advanced:
+                content = QTextEdit(str(self.settings.get(f"{task}_content", "")))
+                content.setMaximumHeight(90)
+                setattr(self, f"w_{task}_content", content)
+                g_form.addRow("Prompt template", content)
             form.addRow(group)
         return _scrollable(page)
 
@@ -391,6 +400,21 @@ class SettingsDialog(FramelessDialog):
         note.setObjectName("dimLabel")
         note.setWordWrap(True)
         form.addRow(note)
+        usage = QWidget()
+        usage_row = QHBoxLayout(usage)
+        usage_row.setContentsMargins(0, 0, 0, 0)
+        usage_row.setSpacing(10)
+        self.deepl_usage_btn = QPushButton("Check usage")
+        self.deepl_usage_btn.clicked.connect(self._check_deepl_usage)
+        self.deepl_usage_bar = QProgressBar()
+        self.deepl_usage_bar.setRange(0, 1000)
+        self.deepl_usage_bar.setVisible(False)
+        self.deepl_usage_label = QLabel("")
+        self.deepl_usage_label.setObjectName("dimLabel")
+        usage_row.addWidget(self.deepl_usage_btn)
+        usage_row.addWidget(self.deepl_usage_bar, 1)
+        usage_row.addWidget(self.deepl_usage_label, 1)
+        form.addRow("Usage", usage)
         tabs.addTab(_scrollable(deepl), "DeepL")
 
         # AI (OpenAI / Gemini)
@@ -415,13 +439,15 @@ class SettingsDialog(FramelessDialog):
             self._ai_provider_page(
                 "chatgpt", "OpenAI API key (.env)", self.openai_key_edit,
                 'Billed per use — get a key at <a href="https://platform.openai.com/api-keys">'
-                'platform.openai.com/api-keys</a>. Models: gpt-4o-mini, gpt-4o, gpt-4.1-mini…'),
+                'platform.openai.com/api-keys</a>. Models: gpt-4o-mini, gpt-4o, gpt-4.1-mini… '
+                'API usage — see <a href="https://platform.openai.com/usage">dashboard</a>.'),
             "OpenAI")
         ai_tabs.addTab(
             self._ai_provider_page(
                 "gemini", "Google API key (.env)", self.gemini_key_edit,
                 'Free tier available — get a key at <a href="https://aistudio.google.com/app/apikey">'
-                'aistudio.google.com/app/apikey</a>. Models: gemini-2.5-flash, gemini-2.5-flash-lite…',
+                'aistudio.google.com/app/apikey</a>. Models: gemini-2.5-flash, gemini-2.5-flash-lite… '
+                'API usage — see <a href="https://aistudio.google.com/usage">AI Studio</a>.',
                 extra_rows=[("Thinking budget (0 = off, -1 = auto)",
                              self._spin("gemini_thinking_budget", -1, 24576, 0))]),
             "Gemini")
@@ -539,6 +565,38 @@ class SettingsDialog(FramelessDialog):
                                     "Could not connect. Check the URL/key and your internet connection.")
         except Exception as exc:
             QMessageBox.critical(self, "Supabase", f"Connection test failed:\n{exc}")
+
+    def _check_deepl_usage(self):
+        """Fetch DeepL quota with the key currently typed in the form."""
+        api_key = self.w_api_key.text().strip()
+        api_url = self.w_api_url.text().strip()
+        self.deepl_usage_btn.setEnabled(False)
+        self.deepl_usage_bar.setVisible(False)
+        self.deepl_usage_label.setStyleSheet("")
+        self.deepl_usage_label.setText("Checking…")
+
+        def done(result):
+            count, limit = result
+            self.deepl_usage_btn.setEnabled(True)
+            if limit > 0:
+                percent = count / limit * 100
+                self.deepl_usage_bar.setValue(min(1000, round(percent * 10)))
+                self.deepl_usage_bar.setFormat(f"{percent:.1f}%")
+                self.deepl_usage_bar.setVisible(True)
+                self.deepl_usage_label.setText(
+                    f"{count:,} / {limit:,} characters this period")
+            else:
+                self.deepl_usage_label.setText(f"{count:,} characters used")
+
+        def fail(message):
+            from app.ui import theme
+            self.deepl_usage_btn.setEnabled(True)
+            self.deepl_usage_label.setStyleSheet(
+                f"color: {theme.current_colors()['danger']};")
+            self.deepl_usage_label.setText(message)
+
+        run_in_thread(translator.get_usage, api_key, api_url,
+                      on_result=done, on_error=fail)
 
     def save(self):
         updated = dict(self.settings)

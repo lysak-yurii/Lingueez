@@ -407,6 +407,12 @@ QGroupBox::title {{
     font-weight: 600;
     background: transparent;
 }}
+#SyncPopover {{
+    background: transparent;  /* the bubble paints its own rounded body */
+}}
+#SyncPopover QLabel {{
+    background: transparent;
+}}
 
 /* ---------- app shell ---------- */
 #Sidebar {{

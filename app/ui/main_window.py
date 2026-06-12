@@ -178,6 +178,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._lock_filter_row_height)
 
         self.sync_status_changed.connect(self._update_sync_status_ui)
+        self._sync_running = False
+        self.sync_popover = None  # built lazily on first cloud-icon click
         self.hotkey_pressed.connect(self.open_add_word_and_translate)
         self.reload_requested.connect(self.load_data)
         self.word_player.index_changed.connect(self._on_player_index)
@@ -236,6 +238,8 @@ class MainWindow(QMainWindow):
         self.texts_page.refresh_theme(self.colors)
         self.player_bar.refresh_theme(self.colors)
         self.window_controls.set_colors(self.colors)
+        if self.sync_popover is not None:
+            self.sync_popover.refresh_theme(self.colors)
         old_menu = self.app_menu
         self.app_menu = self._build_app_menu()
         old_menu.deleteLater()
@@ -253,6 +257,7 @@ class MainWindow(QMainWindow):
         export_menu.addAction("Excel / CSV…", self.export_excel)
         export_menu.addAction("TXT…", self.export_txt)
         export_menu.addAction("Audio (MP3)…", self.save_audio_action)
+        menu.addAction(self._icon("archive"), "Backups…", self.open_backups)
         menu.addSeparator()
         # carry the checked states over when the menu is rebuilt (theme change)
         show_source = getattr(self, "action_show_source", None)
@@ -267,6 +272,7 @@ class MainWindow(QMainWindow):
         menu.addAction(self.action_show_created)
         menu.addAction(self._icon("rows"), "Max words…", self.prompt_row_limit)
         menu.addSeparator()
+        menu.addAction(self._icon("list"), "View Log", self.open_log_window)
         menu.addAction("About", self.show_about)
         menu.addAction(self._icon("x"), "Quit", self.quit_app)
         return menu
@@ -315,8 +321,6 @@ class MainWindow(QMainWindow):
                                     lambda: self.switch_page(PAGE_TEXTS),
                                     checkable=True)
         nav_button("trash", "Bin (deleted items)", self.open_bin)
-        nav_button("archive", "Backups", self.open_backups)
-        nav_button("list", "Log", self.open_log_window)
         sb.addStretch(1)
         nav_button("sliders", "Settings", self.open_settings)
 
@@ -1490,6 +1494,7 @@ class MainWindow(QMainWindow):
             self.sync_status_changed.emit("error", "Sync failed: check internet or credentials")
 
     def _update_sync_status_ui(self, status, message=""):
+        self._sync_running = status == "syncing"
         if self.sync_button is None:
             return
         name, color_key = SYNC_ICONS.get(status, SYNC_ICONS["idle"])
@@ -1502,19 +1507,14 @@ class MainWindow(QMainWindow):
                 self.status_message.setText("")))
 
     def show_sync_info(self):
-        try:
-            info = self.sync_manager.get_sync_status()
-        except Exception as exc:
-            info = {"error": str(exc)}
-        lines = [f"{k}: {v}" for k, v in info.items()]
-        box = QMessageBox(self)
-        box.setWindowTitle("Cloud Sync")
-        box.setText("Sync status:\n\n" + "\n".join(lines))
-        sync_now = box.addButton("Sync Now", QMessageBox.AcceptRole)
-        box.addButton(QMessageBox.Close)
-        box.exec()
-        if box.clickedButton() is sync_now:
-            run_in_thread(self._run_startup_sync)
+        if self.sync_popover is None:
+            from app.ui.sync_popover import SyncPopover
+            self.sync_popover = SyncPopover(self.colors, parent=self)
+            self.sync_popover.sync_requested.connect(
+                lambda: run_in_thread(self._run_startup_sync))
+        self.sync_popover.show_below(self.sync_button,
+                                     self.sync_manager.get_sync_status,
+                                     syncing=self._sync_running)
 
     def _sync_before_db_operation(self, force=False):
         """Quick background pull from cloud before local writes."""
