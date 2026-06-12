@@ -8,18 +8,19 @@ save and delete.
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
     QMessageBox, QPushButton, QSplitter, QStackedLayout, QStyle,
     QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from app.config import load_settings
+from app.config import load_settings, save_settings
 from app.core.audio import lang_codes, speak_word
 from app.core.backup_management import backup_database
+from app.core.translator import DEEPL_LANGUAGE_CODES, translate
 from app.ui import icons
 from app.ui.animations import fade_swap
 from app.ui.dialogs.add_text import AddTextDialog
@@ -119,6 +120,11 @@ class TextsPage(QWidget):
         self.current = None    # text dict loaded in the reader
         self.search_query = ""
         self.is_reading = False
+        self.translation_visible = False
+        self._trans_request = 0          # stale-result guard, as in WordPopup
+        self._translation_cache = {}     # (text_id, target) -> (source, translation)
+        self._saved_splitter_sizes = None
+        self._syncing_scroll = False
         self._loading = False  # populating editors programmatically
         self._dirty = False
         self._loaded_once = False
@@ -172,9 +178,11 @@ class TextsPage(QWidget):
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(8)
         splitter.setChildrenCollapsible(False)
+        self._splitter = splitter
 
         # ---------- left: filters + list ----------
         left = QWidget()
+        self._left_panel = left
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
         ll.setSpacing(8)
@@ -260,6 +268,13 @@ class TextsPage(QWidget):
         top.addWidget(self.title_edit, 1)
         self.tts_btn = self._icon_button("volume", "text", "Read aloud", self.toggle_reading)
         top.addWidget(self.tts_btn)
+        self.translate_btn = self._icon_button(
+            "translate", "text", "Translate text", self.toggle_translation)
+        top.addWidget(self.translate_btn)
+        self.trans_lang_btn = self._icon_button(
+            "chevron-down", "text", "Translation language",
+            self._pick_translation_language, size=12)
+        top.addWidget(self.trans_lang_btn)
         self.edit_btn = self._icon_button("edit", "text", "Edit text", self._on_edit_toggled)
         self.edit_btn.setCheckable(True)
         top.addWidget(self.edit_btn)
@@ -305,7 +320,24 @@ class TextsPage(QWidget):
         self.body.viewport().setCursor(Qt.ArrowCursor)
         self.body.setContextMenuPolicy(Qt.CustomContextMenu)
         self.body.customContextMenuRequested.connect(self._body_context_menu)
-        cv.addWidget(self.body, 1)
+
+        # original | translation, side by side while translation mode is on
+        self.body_split = QSplitter(Qt.Horizontal)
+        self.body_split.setHandleWidth(8)
+        self.body_split.setChildrenCollapsible(False)
+        self.body_split.addWidget(self.body)
+        self.trans_body = QTextEdit(objectName="ReaderBody")
+        self.trans_body.setReadOnly(True)
+        self.trans_body.viewport().setCursor(Qt.ArrowCursor)
+        self.trans_body.setVisible(False)
+        self.body_split.addWidget(self.trans_body)
+        self.body_split.setStretchFactor(0, 1)
+        self.body_split.setStretchFactor(1, 1)
+        self.body.verticalScrollBar().valueChanged.connect(
+            lambda v: self._sync_scroll(self.body, self.trans_body))
+        self.trans_body.verticalScrollBar().valueChanged.connect(
+            lambda v: self._sync_scroll(self.trans_body, self.body))
+        cv.addWidget(self.body_split, 1)
 
         bottom = QHBoxLayout()
         bottom.setSpacing(4)
@@ -344,6 +376,8 @@ class TextsPage(QWidget):
             self.tts_btn.setIcon(icons.icon("stop", colors["danger"], 18))
         if self.edit_btn.isChecked():
             self.edit_btn.setIcon(icons.icon("edit", colors["accent_text"], 18))
+        if self.translation_visible:
+            self.translate_btn.setIcon(icons.icon("translate", colors["accent_text"], 18))
         self.empty_icon.setPixmap(icons.pixmap("file-text", colors["text_dim"], 44))
         self.reader_bar.refresh_theme(colors)
         self.word_popup.refresh_theme(colors)
@@ -447,6 +481,7 @@ class TextsPage(QWidget):
         if not self.filtered:
             self.current = None
             self._set_dirty(False)
+            self.close_translation()
             if self.texts:
                 self.empty_title.setText("No matching texts")
                 self.empty_sub.setText("Try a different search or language filter.")
@@ -579,6 +614,8 @@ class TextsPage(QWidget):
         self.prev_btn.setEnabled(row > 0)
         self.next_btn.setEnabled(row < len(self.filtered) - 1)
         self.reader_stack.setCurrentIndex(1)
+        if self.translation_visible:
+            self._translate_current()
 
     def _select_relative(self, delta):
         row = self.listing.currentRow() + delta
@@ -590,6 +627,7 @@ class TextsPage(QWidget):
     def _on_edit_toggled(self, checked):
         if checked:
             self.stop_reading()
+            self.close_translation()  # edits would make the translation stale
         self._set_edit_mode(checked)
 
     def _set_edit_mode(self, editing):
@@ -728,6 +766,120 @@ class TextsPage(QWidget):
 
     def _on_reader_error(self, message):
         show_toast(self.window(), "Reader", message, "warning")
+
+    # --------------------------------------------------------- translation
+
+    def toggle_translation(self):
+        if self.translation_visible:
+            self.close_translation()
+        else:
+            self._open_translation()
+
+    def _open_translation(self):
+        """Side-by-side mode: list collapses, translation pane opens."""
+        if self.current is None or self.translation_visible:
+            return
+        self._set_edit_mode(False)
+        self.translation_visible = True
+        self._saved_splitter_sizes = self._splitter.sizes()
+        self._left_panel.setVisible(False)
+        self.trans_body.setVisible(True)
+        total = max(2, sum(self.body_split.sizes()))
+        self.body_split.setSizes([total // 2, total - total // 2])
+        self.translate_btn.setIcon(
+            icons.icon("translate", self._colors["accent_text"], 18))
+        self.translate_btn.setToolTip("Hide translation")
+        self._translate_current()
+
+    def close_translation(self):
+        if not self.translation_visible:
+            return
+        self.translation_visible = False
+        self._trans_request += 1  # orphan any in-flight worker result
+        self.trans_body.setVisible(False)
+        self._left_panel.setVisible(True)
+        if self._saved_splitter_sizes:
+            self._splitter.setSizes(self._saved_splitter_sizes)
+        self.translate_btn.setIcon(icons.icon("translate", self._colors["text"], 18))
+        self.translate_btn.setToolTip("Translate text")
+
+    def _translate_target(self):
+        # shared with the word popup, so both translate to the same language
+        target = str(load_settings().get("reader_translate_target", "English"))
+        return target if target in DEEPL_LANGUAGE_CODES else "English"
+
+    def _pick_translation_language(self):
+        menu = QMenu(self)
+        current = self._translate_target()
+        for name in sorted(DEEPL_LANGUAGE_CODES):
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == current)
+        chosen = menu.exec(self.trans_lang_btn.mapToGlobal(
+            QPoint(0, self.trans_lang_btn.height())))
+        if chosen and chosen.text() != current:
+            settings = load_settings()
+            settings["reader_translate_target"] = chosen.text()
+            save_settings(settings)
+            if self.translation_visible:
+                self._translate_current()
+
+    def _set_translation_text(self, text, dim=False, danger=False):
+        color = self._colors["danger"] if danger else (
+            self._colors["text_dim"] if dim else None)
+        self.trans_body.setStyleSheet(f"color: {color};" if color else "")
+        self.trans_body.setPlainText(text)
+
+    def _translate_current(self):
+        if self.current is None:
+            return
+        self._trans_request += 1
+        request = self._trans_request
+        text = self.body.toPlainText().strip()
+        if not text:
+            self._set_translation_text("")
+            return
+        target = self._translate_target()
+        source = self.language_combo.currentText()
+        source = source if source in DEEPL_LANGUAGE_CODES else None
+        if source == target:
+            source = None  # let DeepL detect; avoids same-language no-ops
+        key = (self.current.get('ID'), target)
+        cached = self._translation_cache.get(key)
+        if cached and cached[0] == text:
+            self._set_translation_text(cached[1])
+            return
+        self._set_translation_text("Translating…", dim=True)
+
+        def work():
+            translation, _detected = translate(text, target, source)
+            return translation
+
+        def done(translation):
+            if request != self._trans_request:
+                return
+            self._translation_cache[key] = (text, translation)
+            self._set_translation_text(translation)
+
+        def fail(message):
+            if request != self._trans_request:
+                return
+            logging.warning(f"Text translation failed: {message}")
+            self._set_translation_text(message, danger=True)
+            show_toast(self.window(), "Translation", message, "warning")
+
+        run_in_thread(work, on_result=done, on_error=fail)
+
+    def _sync_scroll(self, src, dst):
+        """Keep the two panes roughly aligned by scroll proportion."""
+        if self._syncing_scroll or not dst.isVisible():
+            return
+        sbar, dbar = src.verticalScrollBar(), dst.verticalScrollBar()
+        if sbar.maximum() <= 0 or dbar.maximum() <= 0:
+            return
+        self._syncing_scroll = True
+        dbar.setValue(round(sbar.value() / sbar.maximum() * dbar.maximum()))
+        self._syncing_scroll = False
 
     # -------------------------------------------------------- highlighting
 

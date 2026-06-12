@@ -58,6 +58,8 @@ ICONS = {
     "swap": '<path d="M7 16V4"/><polyline points="3 8 7 4 11 8"/>'
             '<path d="M17 8v12"/><polyline points="13 16 17 20 21 16"/>',
     "filter": '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+    "translate": '<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/>'
+                 '<path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>',
     "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
     "chevron-left": '<polyline points="15 18 9 12 15 6"/>',
     "chevron-right": '<polyline points="9 18 15 12 9 6"/>',
