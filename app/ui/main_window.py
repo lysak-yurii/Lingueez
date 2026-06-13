@@ -7,7 +7,7 @@ import sys
 import threading
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import QElapsedTimer, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, QEvent, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence, QShortcut,
 )
@@ -28,6 +28,7 @@ from app.core.sync_manager import SyncManager
 from app.core.data_management import open_words_from_excel
 from app.ui import icons, theme
 from app.ui.animations import AnimatedStackedWidget, crossfade_during, fade_swap
+from app.ui.mini_player import MiniPlayer
 from app.ui.player import PlayerBar, WordPlayer
 from app.ui.texts_page import TextsPage
 from app.ui.toast import show_toast
@@ -188,6 +189,7 @@ class MainWindow(QMainWindow):
         self.df = None
         self.is_reading_active = False
         self.word_player = WordPlayer(self)
+        self._mini_positioned = False  # mini player placed on first show
         self._playing_records = []
         self.show_source = False
         self.show_created = False
@@ -212,6 +214,7 @@ class MainWindow(QMainWindow):
         self.hotkey_pressed.connect(self.open_add_word_and_translate)
         self.reload_requested.connect(self.load_data)
         self.word_player.index_changed.connect(self._on_player_index)
+        self.word_player.part_changed.connect(self._on_player_part)
         self.word_player.state_changed.connect(self._on_player_state)
         self.word_player.finished.connect(self._on_player_finished)
         # the texts reader uses the same audio output — one player at a time
@@ -288,6 +291,7 @@ class MainWindow(QMainWindow):
             self.read_button.setIcon(self._icon("stop", "danger", 17))
         self.texts_page.refresh_theme(self.colors)
         self.player_bar.refresh_theme(self.colors)
+        self.mini_player.refresh_theme(self.colors)
         self.window_controls.set_colors(self.colors)
         if self.sync_popover is not None:
             self.sync_popover.refresh_theme(self.colors)
@@ -539,6 +543,15 @@ class MainWindow(QMainWindow):
         self.player_bar.toggle_clicked.connect(self.word_player.toggle_pause)
         self.player_bar.next_clicked.connect(self.word_player.next)
         self.player_bar.stop_clicked.connect(self.word_player.stop)
+
+        # ---------- floating mini player (shown while hidden/minimized) ----------
+        self.mini_player = MiniPlayer(self.colors)
+        self.mini_player.prev_clicked.connect(self.word_player.prev)
+        self.mini_player.toggle_clicked.connect(self.word_player.toggle_pause)
+        self.mini_player.next_clicked.connect(self.word_player.next)
+        self.mini_player.restore_requested.connect(self.show_window)
+        self.mini_player.moved.connect(
+            lambda: save_geometry(self.mini_player, "mini_player"))
 
         self.action_bar.setVisible(False)
         f.addWidget(self.player_bar)
@@ -845,6 +858,7 @@ class MainWindow(QMainWindow):
         if reason == QSystemTrayIcon.Trigger:
             if self.isVisible():
                 self.hide()
+                self._sync_mini_player()
             else:
                 self.show_window()
 
@@ -853,6 +867,39 @@ class MainWindow(QMainWindow):
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
         self.raise_()
         self.activateWindow()
+        self._sync_mini_player()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange:
+            self._sync_mini_player()
+
+    def _sync_mini_player(self):
+        """Float the mini player only while reading AND the window is away."""
+        show = self.is_reading_active and (not self.isVisible() or self.isMinimized())
+        if show:
+            if not self._mini_positioned:
+                self._mini_positioned = True
+                self._restore_mini_geometry()
+            self.mini_player.show()
+            self.mini_player.raise_()
+        else:
+            self.mini_player.hide()
+
+    def _restore_mini_geometry(self):
+        """Place the mini player at its saved spot, or bottom-right on first run."""
+        entry = None
+        if os.path.exists(GEOMETRY_FILE):
+            try:
+                with open(GEOMETRY_FILE) as fh:
+                    entry = json.load(fh).get("mini_player", {}).get("geometry")
+            except Exception:
+                entry = None
+        if isinstance(entry, list) and len(entry) == 4:
+            self.mini_player.resize(entry[2], self.mini_player.HEIGHT)
+            self.mini_player.move(entry[0], entry[1])
+        else:
+            self.mini_player.place_default()
 
     def closeEvent(self, event):
         if self._quitting:
@@ -863,6 +910,7 @@ class MainWindow(QMainWindow):
         save_geometry(self, "main_window")
         self.hide()
         event.ignore()
+        self._sync_mini_player()
 
     def quit_app(self):
         self._quitting = True
@@ -884,6 +932,9 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         save_geometry(self, "main_window")
+        if self._mini_positioned:
+            save_geometry(self.mini_player, "mini_player")
+        self.mini_player.hide()
         self.tray.hide()
         QApplication.quit()
 
@@ -1309,7 +1360,10 @@ class MainWindow(QMainWindow):
         self._set_playback_ui(True)
         self.player_bar.set_paused(False)
         self.player_bar.set_position(0, len(records), records[0].get('Word1', ''))
+        self.mini_player.set_paused(False)
+        self.mini_player.set_pair(records[0].get('Word1', ''), records[0].get('Word2', ''))
         self.word_player.play(words, languages)
+        self._sync_mini_player()  # may already be hidden to tray
 
     def _set_playback_ui(self, active):
         """Show/hide the player bar; the words-only filter chips squash to
@@ -1380,16 +1434,22 @@ class MainWindow(QMainWindow):
             return
         record = records[i]
         self.player_bar.set_position(i, len(records), record.get('Word1', ''))
+        self.mini_player.set_pair(record.get('Word1', ''), record.get('Word2', ''))
         self.model.set_queued_ids(r.get('ID') for r in records[i + 1:])
         row = self.model.set_playing_id(record.get('ID'))
         if row >= 0:
             self.table.scrollTo(self.model.index(row, COL_WORD1))
 
+    def _on_player_part(self, slot):
+        self.mini_player.set_active_part(slot)
+
     def _on_player_state(self, paused):
         self.player_bar.set_paused(paused)
+        self.mini_player.set_paused(paused)
 
     def _on_player_finished(self):
         self._set_playback_ui(False)
+        self.mini_player.hide()
         self.model.set_playing_id(None)
         self.model.set_queued_ids(())
 

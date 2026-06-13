@@ -463,6 +463,13 @@ QGroupBox::title {{
     color: {c['text']};
     padding-left: 4px;
 }}
+#MiniPlayer QPushButton {{
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 2px;
+}}
+#MiniPlayer QPushButton:hover {{ background: {c['surface_alt']}; }}
 #Footer {{
     background: {c['bg_alt']};
     border-top: 1px solid {c['border']};

@@ -40,6 +40,7 @@ class WordPlayer(QObject):
     """
 
     index_changed = Signal(int)   # word index now playing
+    part_changed = Signal(int)    # 0 = word side, 1 = translation side
     state_changed = Signal(bool)  # True = paused
     finished = Signal()           # session ended (natural end or stop)
 
@@ -105,7 +106,7 @@ class WordPlayer(QObject):
             for future in futures:
                 if future.done() and not future.cancelled():
                     try:
-                        for filename in future.result() or []:
+                        for _slot, filename in future.result() or []:
                             audio._remove_temp_file(filename)
                     except Exception:
                         pass
@@ -113,10 +114,11 @@ class WordPlayer(QObject):
                 self.finished.emit()
 
     def _synthesize(self, session, i):
+        """Return [(slot, filename), ...] — slot 0 = word, 1 = translation."""
         word, translation = session.pairs[i]
         lang1, lang2 = session.languages[i]
         files = []
-        for text, lang in ((word, lang1), (translation, lang2)):
+        for slot, (text, lang) in enumerate(((word, lang1), (translation, lang2))):
             if session.stop.is_set():
                 break
             text = str(text or "").strip()
@@ -125,18 +127,19 @@ class WordPlayer(QObject):
             filename = audio.synthesize_speech(
                 text, audio.lang_codes[lang], cancellation_event=session.stop)
             if filename:
-                files.append(filename)
+                files.append((slot, filename))
                 with audio.temp_files_lock:
                     audio.all_temp_files.add(filename)
         return files
 
     def _play_word(self, session, files, i, total):
         """Play one word's files; returns a jump index or None to advance."""
-        for filename in files:
+        for slot, filename in files:
             if session.stop.is_set():
                 return None
             if not filename or not os.path.exists(filename):
                 continue
+            self.part_changed.emit(slot)
             with self._mixer_lock:
                 try:
                     pygame.mixer.music.load(filename)
