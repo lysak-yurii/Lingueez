@@ -7,7 +7,44 @@ mid-animation.
 from PySide6.QtCore import (
     QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation, Qt,
 )
-from PySide6.QtWidgets import QGraphicsOpacityEffect, QLabel, QStackedWidget, QWidget
+from PySide6.QtWidgets import (
+    QApplication, QGraphicsOpacityEffect, QLabel, QStackedWidget, QWidget,
+)
+
+
+def crossfade_during(widget, work, duration=260):
+    """Mask a blocking restyle behind a snapshot, then crossfade to the result.
+
+    Grabs `widget` as it looks now and holds that frozen image on top while
+    `work()` runs — the heavy, event-loop-blocking part such as a full
+    `setStyleSheet()` — then fades the stale snapshot out to reveal the freshly
+    styled widget underneath. The user sees a clean old→new dissolve instead of
+    a half-painted window locking up.
+    """
+    if not widget.isVisible():
+        work()
+        return
+    snap = QLabel(widget)
+    snap.setAttribute(Qt.WA_TransparentForMouseEvents)
+    snap.setPixmap(widget.grab())
+    snap.setGeometry(widget.rect())
+    snap.show()
+    snap.raise_()
+    # Flush once so the snapshot is actually on screen before work() blocks
+    # the event loop; otherwise the freeze shows through.
+    QApplication.processEvents()
+
+    work()
+
+    effect = QGraphicsOpacityEffect(snap)
+    snap.setGraphicsEffect(effect)
+    anim = QPropertyAnimation(effect, b"opacity", snap)
+    anim.setDuration(duration)
+    anim.setStartValue(1.0)
+    anim.setEndValue(0.0)
+    anim.setEasingCurve(QEasingCurve.InOutCubic)
+    anim.finished.connect(snap.deleteLater)
+    anim.start(QPropertyAnimation.DeleteWhenStopped)
 
 
 def fade_swap(widget, duration=140):

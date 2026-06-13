@@ -27,7 +27,7 @@ from app.core.shell_utils import suggest_filename
 from app.core.sync_manager import SyncManager
 from app.core.data_management import open_words_from_excel
 from app.ui import icons, theme
-from app.ui.animations import AnimatedStackedWidget, fade_swap
+from app.ui.animations import AnimatedStackedWidget, crossfade_during, fade_swap
 from app.ui.player import PlayerBar, WordPlayer
 from app.ui.texts_page import TextsPage
 from app.ui.toast import show_toast
@@ -1637,17 +1637,24 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self)
         if dialog.exec():
             self.settings = load_settings()
-            app = QApplication.instance()
-            self.colors = theme.apply_theme(
-                app,
-                self.settings.get("appearance_mode", "System"),
-                get_float(self.settings, "widget_scaling", 1.0))
-            self.model.set_colors(self.colors)
-            self._refresh_icons()
-            self._lock_filter_row_height()
+
+            def _apply():
+                app = QApplication.instance()
+                self.colors = theme.apply_theme(
+                    app,
+                    self.settings.get("appearance_mode", "System"),
+                    get_float(self.settings, "widget_scaling", 1.0))
+                self.model.set_colors(self.colors)
+                self._refresh_icons()
+                self._lock_filter_row_height()
+                self._apply_table_density()
+                self.refresh_display()
+
+            # Mask the (unavoidable) full-app restyle behind a frozen snapshot,
+            # then crossfade to the new theme so it reads as a smooth dissolve
+            # rather than a ~2s freeze.
+            crossfade_during(self, _apply)
             self._apply_global_hotkey()
-            self._apply_table_density()
-            self.refresh_display()
             show_toast(self, "Settings", "Settings saved.", "success")
 
     def open_log_window(self):
