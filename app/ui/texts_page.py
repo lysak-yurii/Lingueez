@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
 )
 
-from app.config import load_settings, save_settings
+from app.config import get_float, get_int, load_settings, save_settings
 from app.core.audio import lang_codes, speak_word
 from app.core.backup_management import backup_database
 from app.core.translator import DEEPL_LANGUAGE_CODES, translate
@@ -110,6 +110,50 @@ class TextCardDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+PAPER_MODES = ("off", "white", "sepia")  # reading-pane page, cycled by the toolbar
+
+
+def _norm_paper_mode(value):
+    """Coerce a stored reader_paper_mode value (incl. the legacy bool) to a mode."""
+    v = str(value or "").strip().lower()
+    if v in ("white", "sepia"):
+        return v
+    if v in ("true", "1", "yes"):  # legacy bool -> the plain white page
+        return "white"
+    return "off"
+
+
+class ReaderTextEdit(QTextEdit):
+    """Reading pane that zooms its font on Ctrl+scroll / Ctrl +/- / Ctrl+0."""
+
+    # Set by TextsPage; called with a step delta or the string "reset".
+    on_zoom = None
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier and self.on_zoom:
+            self.on_zoom(1 if event.angleDelta().y() > 0 else -1)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier and self.on_zoom:
+            key = event.key()
+            if key in (Qt.Key_Plus, Qt.Key_Equal):
+                self.on_zoom(1)
+                event.accept()
+                return
+            if key in (Qt.Key_Minus, Qt.Key_Underscore):
+                self.on_zoom(-1)
+                event.accept()
+                return
+            if key == Qt.Key_0:
+                self.on_zoom("reset")
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
+
 class TextsPage(QWidget):
     """Embedded replacement for the old Texts popup dialog."""
 
@@ -144,6 +188,11 @@ class TextsPage(QWidget):
         self._word_range = None
         self._hover_range = None
         self._popup_range = None     # word the translation popup belongs to
+        _s = load_settings()
+        self._reader_zoom = get_int(_s, "reader_zoom", 0)  # font pt offset
+        self.reader_paper = _norm_paper_mode(_s.get("reader_paper_mode"))  # off|white|sepia
+        self._reader_base_pt = self._compute_reader_base_pt(_s)
+        self._trans_color = None     # None | "dim" | "danger" for trans pane
         self._press_pos = None       # word-click gesture tracking
         self._pending_click = None   # viewport pos of a click awaiting the
         self._click_timer = QTimer(self)  # double-click window while reading
@@ -289,6 +338,10 @@ class TextsPage(QWidget):
         self.focus_btn = self._icon_button(
             "book-open", "text", "Focus mode", self.toggle_focus)
         top.addWidget(self.focus_btn)
+        self.paper_btn = self._icon_button(
+            "book", "text", "Paper mode", self.toggle_paper)
+        self.paper_btn.setCheckable(True)
+        top.addWidget(self.paper_btn)
         self.edit_btn = self._icon_button("edit", "text", "Edit text", self._on_edit_toggled)
         self.edit_btn.setCheckable(True)
         top.addWidget(self.edit_btn)
@@ -326,7 +379,8 @@ class TextsPage(QWidget):
         self.reader_bar.setVisible(False)
         cv.addWidget(self.reader_bar)
 
-        self.body = QTextEdit(objectName="ReaderBody")
+        self.body = ReaderTextEdit(objectName="ReaderBody")
+        self.body.on_zoom = self._zoom_reader
         self.body.setReadOnly(True)  # reading-first; editing via the pencil toggle
         self.body.textChanged.connect(self._mark_dirty)
         self.body.viewport().installEventFilter(self)
@@ -340,7 +394,8 @@ class TextsPage(QWidget):
         self.body_split.setHandleWidth(8)
         self.body_split.setChildrenCollapsible(False)
         self.body_split.addWidget(self.body)
-        self.trans_body = QTextEdit(objectName="ReaderBody")
+        self.trans_body = ReaderTextEdit(objectName="ReaderBody")
+        self.trans_body.on_zoom = self._zoom_reader
         self.trans_body.setReadOnly(True)
         self.trans_body.viewport().setCursor(Qt.ArrowCursor)
         self.trans_body.setVisible(False)
@@ -379,6 +434,9 @@ class TextsPage(QWidget):
         splitter.setSizes([300, 620])
         root.addWidget(splitter)
 
+        self._update_paper_button()
+        self._apply_reader_style()
+
     def refresh_theme(self, colors):
         """Re-tint icons and delegate colors after a theme change."""
         self._colors = colors
@@ -394,9 +452,12 @@ class TextsPage(QWidget):
             self.translate_btn.setIcon(icons.icon("translate", colors["accent_text"], 18))
         if self.focus_mode:
             self.focus_btn.setIcon(icons.icon("book-open", colors["accent_text"], 18))
+        self._update_paper_button()
         self.empty_icon.setPixmap(icons.pixmap("file-text", colors["text_dim"], 44))
         self.reader_bar.refresh_theme(colors)
         self.word_popup.refresh_theme(colors)
+        self._reader_base_pt = self._compute_reader_base_pt(load_settings())
+        self._apply_reader_style()
         self._apply_highlight()
 
     # ---------------------------------------------------------------- data
@@ -827,6 +888,88 @@ class TextsPage(QWidget):
         self.focus_btn.setToolTip(
             "Exit focus mode" if self.focus_mode else "Focus mode")
 
+    # ---- reader font zoom + paper (inverted) mode -----------------------
+
+    def _compute_reader_base_pt(self, settings):
+        """Default reading-pane font size, matching the ReaderBody QSS rule."""
+        scaling = get_float(settings, "widget_scaling", 1.0)
+        return max(8, round(10 * scaling)) + 1
+
+    def _reader_font_pt(self):
+        return max(8, min(40, self._reader_base_pt + self._reader_zoom))
+
+    def _zoom_reader(self, delta):
+        """Step (or reset) the reading-pane font size and persist it."""
+        new = 0 if delta == "reset" else max(-4, min(30, self._reader_zoom + delta))
+        if new == self._reader_zoom:
+            return
+        self._reader_zoom = new
+        settings = load_settings()
+        settings["reader_zoom"] = str(new)
+        save_settings(settings)
+        self._apply_reader_style()
+
+    def _is_dark_theme(self):
+        bg = QColor(self._colors["bg"])
+        return (bg.red() + bg.green() + bg.blue()) < 384  # < 128 avg
+
+    def _paper_modes(self):
+        """Cycle order for the current theme. Light themes skip the (redundant)
+        white page and just toggle sepia."""
+        return PAPER_MODES if self._is_dark_theme() else ("off", "sepia")
+
+    def toggle_paper(self):
+        """Cycle the reading-pane page (dark: off->white->sepia, light: off->sepia)."""
+        modes = self._paper_modes()
+        idx = modes.index(self.reader_paper) if self.reader_paper in modes else 0
+        nxt = modes[(idx + 1) % len(modes)]
+        self.reader_paper = nxt
+        settings = load_settings()
+        settings["reader_paper_mode"] = nxt
+        save_settings(settings)
+        self._update_paper_button()
+        self._apply_reader_style()
+
+    def _update_paper_button(self):
+        on = self.reader_paper != "off"
+        self.paper_btn.setChecked(on)
+        color = "accent_text" if on else "text"
+        self.paper_btn.setIcon(icons.icon("book", self._colors[color], 18))
+        self.paper_btn.setToolTip({
+            "off": "Paper mode: off",
+            "white": "Paper: white (click for sepia)",
+            "sepia": "Paper: sepia (click to turn off)",
+        }[self.reader_paper])
+
+    def _paper_colors(self):
+        """(background, text) for the paper reading pane, or None when off.
+
+        White is a plain bright page; sepia is a warm cream page. Both are
+        available in either theme."""
+        return {
+            "white": ("#ffffff", "#1a1a1a"),
+            "sepia": ("#f5ecd9", "#5b4636"),
+        }.get(self.reader_paper)
+
+    def _reader_qss(self):
+        """Widget stylesheet shared by both panes: font size + optional invert."""
+        qss = f"font-size: {self._reader_font_pt()}pt;"
+        paper = self._paper_colors()
+        if paper:
+            qss += f" background: {paper[0]}; color: {paper[1]};" \
+                   " border-radius: 8px; padding: 6px;"
+        return qss
+
+    def _apply_reader_style(self):
+        self.body.setStyleSheet(self._reader_qss())
+        self._apply_trans_style()
+
+    def _apply_trans_style(self):
+        qss = self._reader_qss()
+        if self._trans_color:  # status message color wins over the pane text color
+            qss += f" color: {self._colors['danger' if self._trans_color == 'danger' else 'text_dim']};"
+        self.trans_body.setStyleSheet(qss)
+
     def _reset_modes(self):
         """Force both panes back to the default (list shown) — used when the
         reader empties so the list and its add toolbar are never left hidden."""
@@ -950,9 +1093,8 @@ class TextsPage(QWidget):
                 self._translate_current()
 
     def _set_translation_text(self, text, dim=False, danger=False):
-        color = self._colors["danger"] if danger else (
-            self._colors["text_dim"] if dim else None)
-        self.trans_body.setStyleSheet(f"color: {color};" if color else "")
+        self._trans_color = "danger" if danger else ("dim" if dim else None)
+        self._apply_trans_style()
         self.trans_body.setPlainText(text)
         self._dst_spans = None  # translation changed — sync spans are stale
 

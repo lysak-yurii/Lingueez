@@ -21,6 +21,8 @@ DEFAULTS = {
     "requests_per_sec": "5",
     # Reader
     "reader_translate_target": "English",  # word-popup translation target
+    "reader_zoom": "0",                 # font-size pt offset (Ctrl+scroll / Ctrl +/-)
+    "reader_paper_mode": "off",         # reading-pane page: off | white | sepia
     # TTS
     "tts_provider": "gTTS",
     "google_cloud_tts_credentials_path": "",

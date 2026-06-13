@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QTableView, QVBoxLayout, QWidget, QWidgetAction, QCheckBox, QAbstractItemView,
 )
 
-from app.config import get_bool, get_float, get_int, load_settings
+from app.config import get_bool, get_float, get_int, load_settings, save_settings
 from app.core import db as dbq
 from app.core import exporters
 from app.core.audio import stop_playback
@@ -112,6 +112,34 @@ class _HeaderFilterCombo(QComboBox):
 class WordTableView(QTableView):
     """QTableView where a plain left click on the only selected row
     deselects it again (no Ctrl needed)."""
+
+    # Set by MainWindow; called to step / reset the table density on Ctrl+zoom.
+    density_step = None
+    density_reset = None
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier and self.density_step:
+            self.density_step(1 if event.angleDelta().y() > 0 else -1)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            key = event.key()
+            if key in (Qt.Key_Plus, Qt.Key_Equal) and self.density_step:
+                self.density_step(1)
+                event.accept()
+                return
+            if key in (Qt.Key_Minus, Qt.Key_Underscore) and self.density_step:
+                self.density_step(-1)
+                event.accept()
+                return
+            if key == Qt.Key_0 and self.density_reset:
+                self.density_reset()
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and event.modifiers() == Qt.NoModifier:
@@ -213,6 +241,28 @@ class MainWindow(QMainWindow):
         # polish order (setFont() is overridden by the app QSS at startup)
         self.table.setStyleSheet(f"QTableView {{ font-size: {font_pt}pt; }}")
         self.table.verticalHeader().setDefaultSectionSize(row_px)
+
+    def _step_table_density(self, delta):
+        """Move the table density one level up/down (Ctrl+scroll / Ctrl +/-)."""
+        from app.ui.theme import TABLE_DENSITY, TABLE_DENSITY_DEFAULT
+        order = list(TABLE_DENSITY.keys())
+        current = self.settings.get("table_density", TABLE_DENSITY_DEFAULT)
+        idx = order.index(current) if current in order else order.index(TABLE_DENSITY_DEFAULT)
+        new_idx = max(0, min(len(order) - 1, idx + delta))
+        if order[new_idx] == current:
+            return
+        self.settings["table_density"] = order[new_idx]
+        save_settings(self.settings)
+        self._apply_table_density()
+
+    def _reset_table_density(self):
+        """Restore the default table density (Ctrl+0)."""
+        from app.ui.theme import TABLE_DENSITY_DEFAULT
+        if self.settings.get("table_density") == TABLE_DENSITY_DEFAULT:
+            return
+        self.settings["table_density"] = TABLE_DENSITY_DEFAULT
+        save_settings(self.settings)
+        self._apply_table_density()
 
     def _icon(self, name, color_key="text", size=20):
         return icons.icon(name, self.colors[color_key], size)
@@ -504,6 +554,8 @@ class MainWindow(QMainWindow):
         self.table.setShowGrid(False)
         self.table.setSortingEnabled(False)
         self.table.verticalHeader().setVisible(False)
+        self.table.density_step = self._step_table_density
+        self.table.density_reset = self._reset_table_density
         self._apply_table_density()
         self.table.setWordWrap(False)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
