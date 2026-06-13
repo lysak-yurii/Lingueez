@@ -863,6 +863,12 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentIndex(index)
         self.words_label.setText(self._footer_counts[index])
 
+        if on_words:
+            # the table can miss resizes while hidden (e.g. the window was
+            # maximized on the Texts tab); refit the word columns to the
+            # now-current width once the page is shown and laid out
+            QTimer.singleShot(0, self._fit_word_columns)
+
     def _on_texts_counts(self, shown, total):
         if total == 0:
             text = "No texts yet"

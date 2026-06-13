@@ -5,10 +5,14 @@ Right: reader card with inline title editing, a controllable read-aloud
 player (pause / sentence skips / click-to-seek / word highlighting),
 save and delete.
 """
+import bisect
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEasingCurve, QEvent, QParallelAnimationGroup, QPoint, QPointF,
+    QPropertyAnimation, QRect, QSize, Qt, QTimer, Signal,
+)
 from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout,
@@ -42,6 +46,9 @@ ALL_LANGUAGES = "All languages"
 ALL_LEVELS = "All levels"
 ALL_TOPICS = "All topics"
 CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
+MAX_W = 16777215  # Qt's QWIDGETSIZE_MAX — resets a maximumWidth constraint
+PANEL_ANIM_MS = 220  # matches AnimatedStackedWidget (the Words/Texts toggle)
 
 
 class TextCardDelegate(QStyledItemDelegate):
@@ -121,10 +128,14 @@ class TextsPage(QWidget):
         self.search_query = ""
         self.is_reading = False
         self.translation_visible = False
+        self.focus_mode = False          # list collapsed for more reading space
         self._trans_request = 0          # stale-result guard, as in WordPopup
         self._translation_cache = {}     # (text_id, target) -> (source, translation)
         self._saved_splitter_sizes = None
+        self._panel_anim = None          # running collapse/reveal animation
         self._syncing_scroll = False
+        self._src_spans = None           # cached per-line char spans for sync
+        self._dst_spans = None
         self._loading = False  # populating editors programmatically
         self._dirty = False
         self._loaded_once = False
@@ -275,6 +286,9 @@ class TextsPage(QWidget):
             "chevron-down", "text", "Translation language",
             self._pick_translation_language, size=12)
         top.addWidget(self.trans_lang_btn)
+        self.focus_btn = self._icon_button(
+            "book-open", "text", "Focus mode", self.toggle_focus)
+        top.addWidget(self.focus_btn)
         self.edit_btn = self._icon_button("edit", "text", "Edit text", self._on_edit_toggled)
         self.edit_btn.setCheckable(True)
         top.addWidget(self.edit_btn)
@@ -378,6 +392,8 @@ class TextsPage(QWidget):
             self.edit_btn.setIcon(icons.icon("edit", colors["accent_text"], 18))
         if self.translation_visible:
             self.translate_btn.setIcon(icons.icon("translate", colors["accent_text"], 18))
+        if self.focus_mode:
+            self.focus_btn.setIcon(icons.icon("book-open", colors["accent_text"], 18))
         self.empty_icon.setPixmap(icons.pixmap("file-text", colors["text_dim"], 44))
         self.reader_bar.refresh_theme(colors)
         self.word_popup.refresh_theme(colors)
@@ -481,7 +497,7 @@ class TextsPage(QWidget):
         if not self.filtered:
             self.current = None
             self._set_dirty(False)
-            self.close_translation()
+            self._reset_modes()
             if self.texts:
                 self.empty_title.setText("No matching texts")
                 self.empty_sub.setText("Try a different search or language filter.")
@@ -607,6 +623,7 @@ class TextsPage(QWidget):
         self.words_line.set_full_text(f"From words: {words}" if words else "")
         self.words_line.setVisible(bool(words))
         self.body.setHtml(markup_to_html(str(text.get('Text') or "")))
+        self._src_spans = None  # body changed — sync spans are stale
         self._loading = False
         self._set_dirty(False)
 
@@ -772,36 +789,144 @@ class TextsPage(QWidget):
     def toggle_translation(self):
         if self.translation_visible:
             self.close_translation()
-        else:
-            self._open_translation()
-
-    def _open_translation(self):
-        """Side-by-side mode: list collapses, translation pane opens."""
-        if self.current is None or self.translation_visible:
-            return
-        self._set_edit_mode(False)
-        self.translation_visible = True
-        self._saved_splitter_sizes = self._splitter.sizes()
-        self._left_panel.setVisible(False)
-        self.trans_body.setVisible(True)
-        total = max(2, sum(self.body_split.sizes()))
-        self.body_split.setSizes([total // 2, total - total // 2])
-        self.translate_btn.setIcon(
-            icons.icon("translate", self._colors["accent_text"], 18))
-        self.translate_btn.setToolTip("Hide translation")
-        self._translate_current()
+        elif self.current is not None:
+            self._set_edit_mode(False)
+            if self.focus_mode:          # focus and translation are exclusive
+                self.focus_mode = False
+                self._update_focus_button()
+            self.translation_visible = True
+            self.translate_btn.setIcon(
+                icons.icon("translate", self._colors["accent_text"], 18))
+            self.translate_btn.setToolTip("Hide translation")
+            self._translate_current()
+            self._sync_panels()
 
     def close_translation(self):
         if not self.translation_visible:
             return
+        self._set_translate_off()
+        self._sync_panels()
+
+    def _set_translate_off(self):
         self.translation_visible = False
         self._trans_request += 1  # orphan any in-flight worker result
-        self.trans_body.setVisible(False)
-        self._left_panel.setVisible(True)
-        if self._saved_splitter_sizes:
-            self._splitter.setSizes(self._saved_splitter_sizes)
         self.translate_btn.setIcon(icons.icon("translate", self._colors["text"], 18))
         self.translate_btn.setToolTip("Translate text")
+
+    def toggle_focus(self):
+        """Collapse the list for a distraction-free, full-width single text."""
+        self.focus_mode = not self.focus_mode
+        if self.focus_mode and self.translation_visible:
+            self._set_translate_off()  # focus shows one text — drop translation
+        self._update_focus_button()
+        self._sync_panels()
+
+    def _update_focus_button(self):
+        color = "accent_text" if self.focus_mode else "text"
+        self.focus_btn.setIcon(icons.icon("book-open", self._colors[color], 18))
+        self.focus_btn.setToolTip(
+            "Exit focus mode" if self.focus_mode else "Focus mode")
+
+    def _reset_modes(self):
+        """Force both panes back to the default (list shown) — used when the
+        reader empties so the list and its add toolbar are never left hidden."""
+        if self.focus_mode:
+            self.toggle_focus()
+        self.close_translation()
+        self._sync_panels()
+
+    # ---- panel layout: the list and translation pane collapse/reveal ----
+    #
+    # The list is shown only when neither focus nor translation wants it hidden;
+    # the translation pane follows translation_visible. Both transitions reuse
+    # the maximumWidth slide so they match the Words/Texts tab animation.
+
+    def _sync_panels(self, animate=True):
+        """Animate the list / translation panes toward the current mode state."""
+        show_left = not (self.translation_visible or self.focus_mode)
+        show_trans = self.translation_visible
+
+        if self._panel_anim is not None:
+            self._panel_anim.stop()  # no finished() on stop(); we settle below
+            self._panel_anim = None
+
+        # Remember the user's split before collapsing a currently-shown list.
+        if not show_left and self._left_panel.isVisible() \
+                and self._left_panel.width() > 0:
+            self._saved_splitter_sizes = self._splitter.sizes()
+
+        on_screen = self.isVisible() and self.reader_stack.currentIndex() == 1
+        if not animate or not on_screen:
+            self._finish_panels()
+            return
+
+        group = QParallelAnimationGroup(self)
+
+        if show_left != self._left_panel.isVisible():
+            self._left_panel.setMinimumWidth(0)  # let setSizes drive it to ~0
+            main_total = max(2, sum(self._splitter.sizes()))
+            if show_left:
+                self._left_panel.setMaximumWidth(0)
+                self._left_panel.setVisible(True)
+                saved = self._saved_splitter_sizes or [300]
+                left_start, left_end = 0, saved[0]
+            else:
+                left_start, left_end = self._left_panel.width(), 0
+            group.addAnimation(self._width_anim(
+                self._left_panel, left_start, left_end,
+                lambda w: self._splitter.setSizes([w, max(0, main_total - w)])))
+
+        if show_trans != self.trans_body.isVisible():
+            self.trans_body.setMinimumWidth(0)  # let setSizes drive it to ~0
+            if show_trans:
+                self.trans_body.setMaximumWidth(0)
+                self.trans_body.setVisible(True)
+                trans_start, trans_end = 0, max(2, self._splitter.width() // 2)
+            else:
+                trans_start, trans_end = self.trans_body.width(), 0
+            group.addAnimation(self._width_anim(
+                self.trans_body, trans_start, trans_end, self._set_trans_width))
+
+        if group.animationCount() == 0:
+            self._finish_panels()  # nothing visibly changed (e.g. focus on while
+            return                 # translation already hid the list)
+
+        group.finished.connect(self._finish_panels)
+        self._panel_anim = group
+        group.start(QParallelAnimationGroup.DeleteWhenStopped)
+
+    def _set_trans_width(self, width):
+        # body_split total grows as the list collapses, so read it live
+        total = max(2, sum(self.body_split.sizes()))
+        self.body_split.setSizes([max(0, total - width), width])
+
+    def _width_anim(self, widget, start, end, on_step):
+        anim = QPropertyAnimation(widget, b"maximumWidth", widget)
+        anim.setDuration(PANEL_ANIM_MS)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.valueChanged.connect(lambda v: on_step(int(v)))
+        return anim
+
+    def _finish_panels(self):
+        """Settle the layout exactly from the current mode state (idempotent)."""
+        self._panel_anim = None
+        show_left = not (self.translation_visible or self.focus_mode)
+        show_trans = self.translation_visible
+        self._left_panel.setMaximumWidth(MAX_W)
+        self.trans_body.setMaximumWidth(MAX_W)
+        self._left_panel.setVisible(show_left)
+        self.trans_body.setVisible(show_trans)
+        if show_left:
+            # restore the list's natural drag-floor (we zeroed it to collapse)
+            self._left_panel.setMinimumWidth(
+                self._left_panel.minimumSizeHint().width())
+            if self._saved_splitter_sizes:
+                self._splitter.setSizes(self._saved_splitter_sizes)
+        if show_trans:
+            total = max(2, sum(self.body_split.sizes()))
+            self.body_split.setSizes([total // 2, total - total // 2])
 
     def _translate_target(self):
         # shared with the word popup, so both translate to the same language
@@ -829,6 +954,7 @@ class TextsPage(QWidget):
             self._colors["text_dim"] if dim else None)
         self.trans_body.setStyleSheet(f"color: {color};" if color else "")
         self.trans_body.setPlainText(text)
+        self._dst_spans = None  # translation changed — sync spans are stale
 
     def _translate_current(self):
         if self.current is None:
@@ -871,15 +997,76 @@ class TextsPage(QWidget):
         run_in_thread(work, on_result=done, on_error=fail)
 
     def _sync_scroll(self, src, dst):
-        """Keep the two panes roughly aligned by scroll proportion."""
-        if self._syncing_scroll or not dst.isVisible():
+        """Pin the paragraph at the top of *src* to the top of *dst*.
+
+        Line N in one pane maps to line N in the other (the conventional
+        parallel-text alignment). The fraction scrolled into a line is measured
+        in document *pixels* (scrolling is a pixel operation) so the panes move
+        in continuous lock-step instead of jumping a line at a time, and the two
+        ends are snapped so both panes reach top and bottom together.
+        """
+        if self._syncing_scroll or self._panel_anim is not None \
+                or not dst.isVisible():
             return
+        src_spans = self._spans_for(src)
+        dst_spans = self._spans_for(dst)
+        if not src_spans or not dst_spans:
+            return
+
         sbar, dbar = src.verticalScrollBar(), dst.verticalScrollBar()
-        if sbar.maximum() <= 0 or dbar.maximum() <= 0:
+        if dbar.maximum() <= 0:
             return
         self._syncing_scroll = True
-        dbar.setValue(round(sbar.value() / sbar.maximum() * dbar.maximum()))
-        self._syncing_scroll = False
+        try:
+            sval = sbar.value()
+            if sval <= 0:
+                dbar.setValue(0)
+                return
+            if sval >= sbar.maximum():
+                dbar.setValue(dbar.maximum())
+                return
+
+            top_char = src.cursorForPosition(QPoint(0, 0)).position()
+            starts = [s for s, _ in src_spans]
+            i = max(0, bisect.bisect_right(starts, top_char) - 1)
+            y_i = self._doc_y(src, src_spans[i][0])
+            y_next = (self._doc_y(src, src_spans[i + 1][0])
+                      if i + 1 < len(src_spans)
+                      else sbar.maximum() + src.viewport().height())
+            frac = min(1.0, max(0.0, (sval - y_i) / max(1.0, y_next - y_i)))
+
+            j = min(i, len(dst_spans) - 1)
+            dy_j = self._doc_y(dst, dst_spans[j][0])
+            dy_next = (self._doc_y(dst, dst_spans[j + 1][0])
+                       if j + 1 < len(dst_spans)
+                       else dbar.maximum() + dst.viewport().height())
+            dbar.setValue(round(dy_j + frac * (dy_next - dy_j)))  # auto-clamped
+        finally:
+            self._syncing_scroll = False
+
+    def _doc_y(self, edit, char):
+        """Absolute document-Y (pixels) of *char*, independent of scroll."""
+        cursor = QTextCursor(edit.document())
+        cursor.setPosition(min(char, edit.document().characterCount() - 1))
+        return edit.cursorRect(cursor).top() + edit.verticalScrollBar().value()
+
+    def _spans_for(self, edit):
+        """Cached per-line (start, end) char spans for the body / translation."""
+        if edit is self.body:
+            if self._src_spans is None:
+                self._src_spans = self._line_spans(self.body.toPlainText())
+            return self._src_spans
+        if self._dst_spans is None:
+            self._dst_spans = self._line_spans(self.trans_body.toPlainText())
+        return self._dst_spans
+
+    @staticmethod
+    def _line_spans(text):
+        spans, pos = [], 0
+        for line in text.split("\n"):
+            spans.append((pos, pos + len(line)))
+            pos += len(line) + 1  # + the '\n'
+        return spans
 
     # -------------------------------------------------------- highlighting
 

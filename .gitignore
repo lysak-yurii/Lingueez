@@ -5,6 +5,10 @@ __pycache__/
 
 # Virtual environment
 venv/
+.venv/
+
+# IDE
+.idea/
 
 # Secrets & local config
 .env
