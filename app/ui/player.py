@@ -42,6 +42,7 @@ class WordPlayer(QObject):
     index_changed = Signal(int)   # word index now playing
     part_changed = Signal(int)    # 0 = word side, 1 = translation side
     state_changed = Signal(bool)  # True = paused
+    word_completed = Signal(int)  # a word finished playing in full (not skipped)
     finished = Signal()           # session ended (natural end or stop)
 
     _mixer_lock = threading.Lock()  # pygame.mixer.music is not thread-safe
@@ -99,6 +100,11 @@ class WordPlayer(QObject):
                     logging.error(f"Word synthesis failed: {exc}")
                     files = []
                 jump = self._play_word(session, files, i, total)
+                # A word counts as "listened" only when it played to the end:
+                # jump is None (not skipped via next/prev), the session wasn't
+                # stopped, and there was actual audio.
+                if jump is None and not session.stop.is_set() and files:
+                    self.word_completed.emit(i)
                 i = i + 1 if jump is None else jump
         finally:
             session.stop.set()

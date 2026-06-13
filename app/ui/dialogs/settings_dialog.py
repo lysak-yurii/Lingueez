@@ -65,6 +65,7 @@ class SettingsDialog(FramelessDialog):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._appearance_tab(), "Appearance")
         self.tabs.addTab(self._audio_tab(), "Audio")
+        self.tabs.addTab(self._learning_tab(), "Learning")
         self.tabs.addTab(self._export_tab(), "Export")
         self.tabs.addTab(self._import_tab(), "Import")
         self.tabs.addTab(self._apis_tab(), "APIs")
@@ -336,6 +337,7 @@ class SettingsDialog(FramelessDialog):
         form.addRow("Google Cloud credentials", cred_w)
         form.addRow("Voice type", self._combo("google_cloud_tts_voice_type", ["standard", "wavenet"]))
         form.addRow("Voice name (optional)", self._line("google_cloud_tts_voice_name"))
+
         note = QLabel("The voice used everywhere words are spoken: in-app Read Aloud "
                       "and MP3 export. gTTS is free and needs no setup. Google Cloud TTS "
                       "needs a service-account JSON key (Cloud Console → IAM & Admin → "
@@ -345,6 +347,49 @@ class SettingsDialog(FramelessDialog):
         note.setWordWrap(True)
         form.addRow(note)
         return _scrollable(audio)
+
+    def _learning_tab(self):
+        """Playback-driven learning progression (Read Aloud → word Status)."""
+        page = QWidget()
+        form = QFormLayout(page)
+        form.setContentsMargins(18, 18, 18, 18)
+
+        promote = self._check("playback_promote", True)
+        form.addRow("Promote status while listening", promote)
+
+        rev = self._spin("playback_reviewing_listens", 1, 9998, 3)
+        learn = self._spin("playback_learning_listens", 2, 9999, 15)
+        mast = self._spin("playback_mastered_listens", 3, 10000, 100)
+        form.addRow("Listens to reach Reviewing", rev)
+        form.addRow("Listens to reach Learning", learn)
+        form.addRow("Listens to reach Mastered", mast)
+
+        def reorder(*_):
+            # keep the ladder strictly increasing: Reviewing < Learning < Mastered
+            learn.setMinimum(rev.value() + 1)
+            rev.setMaximum(learn.value() - 1)
+            mast.setMinimum(learn.value() + 1)
+            learn.setMaximum(mast.value() - 1)
+        for s in (rev, learn, mast):
+            s.valueChanged.connect(reorder)
+        reorder()
+
+        def toggle_enabled(on):
+            for s in (rev, learn, mast):
+                s.setEnabled(on)
+        promote.toggled.connect(toggle_enabled)
+        toggle_enabled(promote.isChecked())
+
+        note = QLabel("Fully listening to a word in Read Aloud promotes it along the "
+                      "familiarity ladder New → Reviewing → Learning → Mastered. Each "
+                      "number is the total completed listens needed to reach that level — "
+                      "passive audio exposure is weak, so high values are normal. Words "
+                      "you set to Mastered or Ignored yourself are never changed, and a "
+                      "word is never demoted.")
+        note.setObjectName("dimLabel")
+        note.setWordWrap(True)
+        form.addRow(note)
+        return _scrollable(page)
 
     def _import_tab(self):
         widget = QWidget()

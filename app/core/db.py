@@ -98,10 +98,22 @@ def initialize_database(db_path=DB_PATH):
         )
     ''')
 
+    # Local-only review history (never synced to the cloud). Append-only;
+    # powers playback-driven status progression and the review dashboard.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS review_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            word_id INTEGER NOT NULL,
+            played_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_deletions_table_record ON sync_deletions(table_name, record_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_deletions_synced ON sync_deletions(synced_at)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_queue_synced ON sync_queue(synced_at)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_queue_table_record ON sync_queue(table_name, record_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_review_events_word ON review_events(word_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_review_events_day ON review_events(played_at)')
 
     conn.commit()
     conn.close()
@@ -169,3 +181,86 @@ def get_tag_usage_counts(db_path=DB_PATH):
     counts = dict(cursor.fetchall())
     conn.close()
     return counts
+
+
+def get_definition_counts(db_path=DB_PATH):
+    """Return (filled, total) where filled counts words with a non-empty
+    primary Definition. Used by the statistics dashboard."""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT
+            SUM(CASE WHEN Definition IS NOT NULL AND TRIM(Definition) != ''
+                     THEN 1 ELSE 0 END),
+            COUNT(*)
+        FROM words
+    ''')
+    filled, total = cursor.fetchone()
+    conn.close()
+    return int(filled or 0), int(total or 0)
+
+
+# --------------------------------------------------------------------------- #
+# Review history (local-only). Each fully-listened word logs one event.
+# --------------------------------------------------------------------------- #
+
+def log_review(word_id, played_at_iso=None, db_path=DB_PATH):
+    """Append one review event for a word (one completed listen)."""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    if played_at_iso:
+        cursor.execute('INSERT INTO review_events (word_id, played_at) VALUES (?, ?)',
+                       (int(word_id), played_at_iso))
+    else:
+        cursor.execute('INSERT INTO review_events (word_id) VALUES (?)', (int(word_id),))
+    conn.commit()
+    conn.close()
+
+
+def get_play_count(word_id, db_path=DB_PATH):
+    """Total completed listens recorded for a word."""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM review_events WHERE word_id = ?', (int(word_id),))
+    n = cursor.fetchone()[0]
+    conn.close()
+    return int(n or 0)
+
+
+def get_review_aggregates(top=8, db_path=DB_PATH):
+    """Aggregates for the statistics dashboard.
+
+    Returns ``{"daily": [(YYYY-MM-DD, count), ...] ascending, "total": int,
+    "most_reviewed": [("Word1 → Word2", count), ...]}``. Orphaned events
+    (word deleted) are skipped from ``most_reviewed`` but still counted in the
+    daily totals and ``total``.
+    """
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT date(played_at) AS d, COUNT(*)
+        FROM review_events
+        WHERE played_at IS NOT NULL
+        GROUP BY d ORDER BY d
+    ''')
+    daily = [(d, int(n)) for d, n in cursor.fetchall() if d]
+
+    cursor.execute('SELECT COUNT(*) FROM review_events')
+    total = int(cursor.fetchone()[0] or 0)
+
+    cursor.execute('''
+        SELECT w.Word1, w.Word2, COUNT(*) AS c
+        FROM review_events r JOIN words w ON w.ID = r.word_id
+        GROUP BY r.word_id ORDER BY c DESC, w.Word1 COLLATE NOCASE
+        LIMIT ?
+    ''', (int(top),))
+    most_reviewed = []
+    for w1, w2, c in cursor.fetchall():
+        a = (w1 or "").strip()
+        b = (w2 or "").strip()
+        label = f"{a} → {b}" if b else (a or "—")
+        most_reviewed.append((label, int(c)))
+
+    conn.close()
+    return {"daily": daily, "total": total, "most_reviewed": most_reviewed}

@@ -19,6 +19,11 @@ DEFAULTS = {
     "number_of_repeats": "1",
     "max_concurrent_workers": "2",
     "requests_per_sec": "5",
+    # Playback-driven learning progression (cumulative completed listens per rung)
+    "playback_promote": "True",            # promote word status while listening
+    "playback_reviewing_listens": "3",     # listens to reach Reviewing
+    "playback_learning_listens": "15",     # listens to reach Learning
+    "playback_mastered_listens": "100",    # listens to reach Mastered
     # Reader
     "reader_translate_target": "English",  # word-popup translation target
     "reader_zoom": "0",                 # font-size pt offset (Ctrl+scroll / Ctrl +/-)

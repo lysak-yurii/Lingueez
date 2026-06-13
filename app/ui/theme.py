@@ -565,6 +565,51 @@ QLineEdit#BigInput:focus {{
     border-radius: 12px;
 }}
 #CardFrame:hover {{ border-color: {c['accent']}; }}
+
+/* ---------- statistics dashboard ---------- */
+#StatsScroll, #StatsScroll > QWidget > QWidget, #StatsContent {{
+    background: {c['bg']};
+}}
+#StatCard {{
+    background: {c['surface']};
+    border: 1px solid {c['border']};
+    border-radius: 14px;
+}}
+#SectionHeader {{
+    color: {c['text_dim']};
+    font-size: {base_font_size - 1}pt;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 2px 2px 0 2px;
+}}
+#CardTitle {{
+    color: {c['text']};
+    font-size: {base_font_size + 1}pt;
+    font-weight: 600;
+}}
+#KpiCaption {{
+    color: {c['text_dim']};
+    font-size: {base_font_size - 1}pt;
+    font-weight: 700;
+    letter-spacing: 1px;
+}}
+#KpiValue {{ color: {c['text']}; }}
+#KpiSub {{ color: {c['text_dim']}; font-size: {base_font_size - 1}pt; }}
+#SegmentedControl {{
+    background: {c['surface_alt']};
+    border: 1px solid {c['border']};
+    border-radius: 10px;
+}}
+#SegItem {{
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    padding: 4px 12px;
+    color: {c['text_dim']};
+    font-weight: 600;
+}}
+#SegItem:hover {{ color: {c['text']}; }}
+#SegItem:checked {{ background: {c['surface']}; color: {c['accent']}; }}
 """
 
 

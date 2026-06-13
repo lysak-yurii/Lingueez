@@ -131,6 +131,24 @@ class WordTableModel(QAbstractTableModel):
                                       [Qt.BackgroundRole])
         return self._playing_row
 
+    def update_status(self, word_id, status):
+        """Update one word's Status in place (no model reset) so the status
+        pill repaints without disturbing selection, scroll or playback tints.
+        Returns the affected row, or -1 if the word isn't currently shown."""
+        row = self._row_for_id(word_id)
+        if row < 0:
+            return -1
+        try:
+            self._df.at[row, 'Status'] = status
+        except Exception:
+            pass
+        cells = list(self._rows[row])
+        cells[COL_STATUS] = _fmt(status)
+        self._rows[row] = tuple(cells)
+        idx = self.index(row, COL_STATUS)
+        self.dataChanged.emit(idx, idx, [Qt.DisplayRole, Qt.EditRole])
+        return row
+
     def dataframe(self):
         return self._df
 

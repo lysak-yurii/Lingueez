@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from app.config import get_bool, get_float, get_int, load_settings, save_settings
 from app.core import db as dbq
+from app.core import progression
 from app.core import exporters
 from app.core.audio import stop_playback
 from app.core.backup_management import backup_database
@@ -31,6 +32,7 @@ from app.ui.animations import AnimatedStackedWidget, crossfade_during, fade_swap
 from app.ui.mini_player import MiniPlayer
 from app.ui.player import PlayerBar, WordPlayer
 from app.ui.texts_page import TextsPage
+from app.ui.stats_page import StatsPage
 from app.ui.toast import show_toast
 from app.ui.word_model import (
     COL_ID, COL_CREATED, COL_LANG1, COL_LANG2, COL_SOURCE, COL_STATUS,
@@ -42,7 +44,7 @@ from app.version import APP_NAME, APP_VERSION, BUILD_NUMBER
 GEOMETRY_FILE = "window_geometry.json"
 PREDEFINED_STATUSES = ["New", "To Learn", "Learning", "Mastered", "Ignored"]
 DEFAULT_HOTKEY = "Ctrl+Shift+V"
-PAGE_WORDS, PAGE_TEXTS = 0, 1
+PAGE_WORDS, PAGE_TEXTS, PAGE_STATS = 0, 1, 2
 
 
 def _hotkey_to_pynput(seq):
@@ -196,8 +198,9 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._open_dialogs = {}
         self._tts_fallback_warned = False
-        self._page_search = {PAGE_WORDS: "", PAGE_TEXTS: ""}
-        self._footer_counts = {PAGE_WORDS: "No data", PAGE_TEXTS: "No texts yet"}
+        self._page_search = {PAGE_WORDS: "", PAGE_TEXTS: "", PAGE_STATS: ""}
+        self._footer_counts = {PAGE_WORDS: "No data", PAGE_TEXTS: "No texts yet",
+                               PAGE_STATS: "Statistics"}
         self._words_subtitle = "Vocabulary"
         self._file_view = False  # viewing an opened Excel file (read-only preview)
 
@@ -216,7 +219,12 @@ class MainWindow(QMainWindow):
         self.word_player.index_changed.connect(self._on_player_index)
         self.word_player.part_changed.connect(self._on_player_part)
         self.word_player.state_changed.connect(self._on_player_state)
+        self.word_player.word_completed.connect(self._on_word_completed)
         self.word_player.finished.connect(self._on_player_finished)
+        # playback-driven status progression (settings snapshot per session)
+        self._promote_on_play = True
+        self._thresholds = progression.normalize_thresholds()
+        self._session_status = {}  # word_id -> status, updated as we promote
         # the texts reader uses the same audio output — one player at a time
         self.texts_page.tts_started.connect(self.word_player.stop)
         # mirror the texts reader into the mini player (running-line mode)
@@ -297,6 +305,7 @@ class MainWindow(QMainWindow):
         if self.is_reading_active:
             self.read_button.setIcon(self._icon("stop", "danger", 17))
         self.texts_page.refresh_theme(self.colors)
+        self.stats_page.refresh_theme(self.colors)
         self.player_bar.refresh_theme(self.colors)
         self.mini_player.refresh_theme(self.colors)
         self.window_controls.set_colors(self.colors)
@@ -380,6 +389,9 @@ class MainWindow(QMainWindow):
                                     checkable=True, checked=True)
         self.nav_texts = nav_button("file-text", "Texts",
                                     lambda: self.switch_page(PAGE_TEXTS),
+                                    checkable=True)
+        self.nav_stats = nav_button("bar-chart", "Statistics",
+                                    lambda: self.switch_page(PAGE_STATS),
                                     checkable=True)
         nav_button("trash", "Bin (deleted items)", self.open_bin)
         sb.addStretch(1)
@@ -664,8 +676,11 @@ class MainWindow(QMainWindow):
         self.texts_page = TextsPage(self.db_adapter, self.colors)
         self.texts_page.counts_changed.connect(self._on_texts_counts)
 
+        self.stats_page = StatsPage(self.db_adapter, self.colors)
+
         self.stack.addWidget(words_page)
         self.stack.addWidget(self.texts_page)
+        self.stack.addWidget(self.stats_page)
         root.addWidget(self.stack, 1)
 
         # ---------- footer ----------
@@ -756,6 +771,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence.Delete, self.table, self.delete_rows)
         QShortcut(QKeySequence("Ctrl+1"), self, lambda: self.switch_page(PAGE_WORDS))
         QShortcut(QKeySequence("Ctrl+2"), self, lambda: self.switch_page(PAGE_TEXTS))
+        QShortcut(QKeySequence("Ctrl+3"), self, lambda: self.switch_page(PAGE_STATS))
 
     def _hotkey_setting(self):
         return (self.settings.get("hotkey", DEFAULT_HOTKEY) or "").strip()
@@ -950,15 +966,15 @@ class MainWindow(QMainWindow):
     # -------------------------------------------------------------- pages
 
     def switch_page(self, index, animate=True):
-        """Swap the central view between Words and Texts. The top bar stays
-        shared but contextual: search applies to the active page, while
-        words-only controls (Add Word, search scope) hide on Texts."""
-        self.nav_words.setChecked(index == PAGE_WORDS)
-        self.nav_texts.setChecked(index == PAGE_TEXTS)
-        self._set_icon(self.nav_words, "book-open",
-                       "text" if index == PAGE_WORDS else "text_dim")
-        self._set_icon(self.nav_texts, "file-text",
-                       "text" if index == PAGE_TEXTS else "text_dim")
+        """Swap the central view between Words, Texts and Statistics. The top
+        bar stays shared but contextual: search applies to the active page,
+        while words-only controls (Add Word, search scope) hide elsewhere and
+        search itself is disabled on the dashboard."""
+        for btn, page, icon in ((self.nav_words, PAGE_WORDS, "book-open"),
+                                (self.nav_texts, PAGE_TEXTS, "file-text"),
+                                (self.nav_stats, PAGE_STATS, "bar-chart")):
+            btn.setChecked(index == page)
+            self._set_icon(btn, icon, "text" if index == page else "text_dim")
 
         current = self.stack.currentIndex()
         if index == current:
@@ -970,18 +986,25 @@ class MainWindow(QMainWindow):
         self.search_box.setText(self._page_search.get(index, ""))
         self.search_box.setPlaceholderText(
             "Search words, translations or tags…" if index == PAGE_WORDS
-            else "Search texts by title, content or words…")
+            else "Search texts by title, content or words…" if index == PAGE_TEXTS
+            else "")
         self.search_box.blockSignals(False)
 
         on_words = index == PAGE_WORDS
+        on_stats = index == PAGE_STATS
         self.add_button.setVisible(on_words)
         self.search_scope_btn.setVisible(on_words)
-        self.source_label.setText(self._words_subtitle if on_words else "Texts")
+        self.search_box.setVisible(not on_stats)
+        subtitle = (self._words_subtitle if on_words
+                    else "Statistics" if on_stats else "Texts")
+        self.source_label.setText(subtitle)
         self._update_file_view()
 
-        if not on_words:
+        if index == PAGE_TEXTS:
             self.texts_page.set_search(self.search_box.text())
             self.texts_page.load_texts()
+        elif on_stats:
+            self._refresh_stats()
 
         if animate:
             self.stack.set_current_index_animated(index)
@@ -994,6 +1017,23 @@ class MainWindow(QMainWindow):
             # maximized on the Texts tab); refit the word columns to the
             # now-current width once the page is shown and laid out
             QTimer.singleShot(0, self._fit_word_columns)
+
+    def _refresh_stats(self):
+        """Recompute the dashboard from the in-memory words DataFrame plus tag
+        and definition counts. Cheap and exception-guarded inside the page."""
+        try:
+            tag_counts = dbq.get_tag_usage_counts()
+        except Exception:
+            tag_counts = {}
+        try:
+            def_counts = dbq.get_definition_counts()
+        except Exception:
+            def_counts = None
+        try:
+            reviews = dbq.get_review_aggregates()
+        except Exception:
+            reviews = None
+        self.stats_page.set_data(self.df, tag_counts, def_counts, reviews)
 
     def _on_texts_counts(self, shown, total):
         if total == 0:
@@ -1019,6 +1059,8 @@ class MainWindow(QMainWindow):
             self._update_file_view()
             if self.stack.currentIndex() == PAGE_WORDS:
                 self.source_label.setText(self._words_subtitle)
+            elif self.stack.currentIndex() == PAGE_STATS:
+                self._refresh_stats()
             logging.info("Database loaded successfully.")
         except Exception as exc:
             logging.error(f"Database loading failed: {exc}")
@@ -1361,6 +1403,13 @@ class MainWindow(QMainWindow):
         languages = [(r.get('Language1', ''), r.get('Language2', '')) for r in records]
 
         self._playing_records = records
+        # snapshot progression settings for this session
+        self._promote_on_play = get_bool(self.settings, "playback_promote", True)
+        self._thresholds = progression.normalize_thresholds(
+            get_int(self.settings, "playback_reviewing_listens", 3),
+            get_int(self.settings, "playback_learning_listens", 15),
+            get_int(self.settings, "playback_mastered_listens", 100))
+        self._session_status = {int(r['ID']): r.get('Status') for r in records if r.get('ID') is not None}
         self.texts_page.stop_reading()  # one player at a time
         # the queue is captured; clear the selection first so its highlight
         # doesn't drown out the moving played-row highlight — and so the
@@ -1486,11 +1535,42 @@ class MainWindow(QMainWindow):
         self.player_bar.set_paused(paused)
         self.mini_player.set_paused(paused)
 
+    def _on_word_completed(self, i):
+        """A word finished playing in full: record the listen and, if enabled,
+        promote its status once enough cumulative listens have accrued."""
+        try:
+            records = self._playing_records
+            if not records or i >= len(records):
+                return
+            rec = records[i]
+            wid = rec.get('ID')
+            if wid is None:
+                return
+            wid = int(wid)
+            dbq.log_review(wid, datetime.now().isoformat(timespec='seconds'))
+
+            if self._promote_on_play:
+                count = dbq.get_play_count(wid)
+                current = self._session_status.get(wid, rec.get('Status'))
+                target = progression.next_status(current, count, self._thresholds)
+                if target:
+                    self.db_adapter.update_word(wid, {'Status': target})
+                    self._session_status[wid] = target
+                    if self.df is not None:
+                        self.df.loc[self.df['ID'] == wid, 'Status'] = target
+                    self.model.update_status(wid, target)
+                    show_toast(self, "Promoted",
+                               f"‘{rec.get('Word1', '')}’ → {target}", "success", 2500)
+        except Exception as exc:
+            logging.error(f"Playback status update failed: {exc}")
+
     def _on_player_finished(self):
         self._set_playback_ui(False)
         self.mini_player.hide()
         self.model.set_playing_id(None)
         self.model.set_queued_ids(())
+        if self.stack.currentIndex() == PAGE_STATS:
+            self._refresh_stats()
 
     def save_audio_action(self):
         records = self.selected_records()
