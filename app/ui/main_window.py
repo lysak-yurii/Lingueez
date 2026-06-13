@@ -446,7 +446,7 @@ class MainWindow(QMainWindow):
         search_icon_action = self.search_box.addAction(
             self._icon("search", "text_dim", 16), QLineEdit.LeadingPosition)
         self._themed_icons.append((search_icon_action, "search", "text_dim", 16))
-        h.addWidget(self.search_box, 2)
+        h.addWidget(self.search_box, 2, Qt.AlignVCenter)
 
         self.search_scope_btn = QPushButton(objectName="iconButton")
         self._set_icon(self.search_scope_btn, "filter", "text_dim")
@@ -454,7 +454,19 @@ class MainWindow(QMainWindow):
         self.search_scope_btn.setToolTip("Search scope")
         self.search_scope_btn.setCursor(Qt.PointingHandCursor)
         self.search_scope_btn.clicked.connect(self.show_search_scope_menu)
-        h.addWidget(self.search_scope_btn)
+        h.addWidget(self.search_scope_btn, 0, Qt.AlignVCenter)
+
+        self.add_button = QPushButton(objectName="iconButton")
+        self._set_icon(self.add_button, "plus", "text_dim")
+        self.add_button.setIconSize(QSize(19, 19))
+        self.add_button.setToolTip("Add word")
+        self.add_button.setCursor(Qt.PointingHandCursor)
+        self.add_button.clicked.connect(self.open_add_word)
+        h.addWidget(self.add_button, 0, Qt.AlignVCenter)
+
+        # the search box and its content actions stay grouped and centred; the
+        # global sync button sits with the window controls at the far right
+        h.addStretch(1)
 
         if self.sync_enabled:
             self.sync_button = QPushButton(objectName="iconButton")
@@ -463,21 +475,13 @@ class MainWindow(QMainWindow):
             self.sync_button.setToolTip("Cloud sync: idle")
             self.sync_button.setCursor(Qt.PointingHandCursor)
             self.sync_button.clicked.connect(self.show_sync_info)
-            h.addWidget(self.sync_button)
+            h.addWidget(self.sync_button, 0, Qt.AlignVCenter)
         else:
             self.sync_button = None
 
-        self.add_button = QPushButton(objectName="iconButton")
-        self._set_icon(self.add_button, "plus", "text_dim")
-        self.add_button.setIconSize(QSize(19, 19))
-        self.add_button.setToolTip("Add word")
-        self.add_button.setCursor(Qt.PointingHandCursor)
-        self.add_button.clicked.connect(self.open_add_word)
-        h.addWidget(self.add_button)
-
         h.addSpacing(8)
         self.window_controls = WindowControls(self, self.colors)
-        h.addWidget(self.window_controls, 0, Qt.AlignTop)
+        h.addWidget(self.window_controls, 0, Qt.AlignVCenter)
 
         self._frameless_resizer = FramelessResizer(self)
         QApplication.instance().installEventFilter(self._frameless_resizer)
