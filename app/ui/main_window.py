@@ -21,6 +21,7 @@ from app.config import get_bool, get_float, get_int, load_settings, save_setting
 from app.core import db as dbq
 from app.core import progression
 from app.core import exporters
+from app.core import translator
 from app.core.audio import stop_playback
 from app.core.backup_management import backup_database
 from app.core.database_adapter import DatabaseAdapter
@@ -169,6 +170,7 @@ class MainWindow(QMainWindow):
     sync_status_changed = Signal(str, str)
     hotkey_pressed = Signal()
     reload_requested = Signal()
+    translation_fallback = Signal(str)
 
     def __init__(self, settings, start_hidden=False):
         super().__init__()
@@ -216,6 +218,10 @@ class MainWindow(QMainWindow):
         self.sync_popover = None  # built lazily on first cloud-icon click
         self.hotkey_pressed.connect(self.open_add_word_and_translate)
         self.reload_requested.connect(self.load_data)
+        # Surface DeepL->Google fallbacks (raised on worker threads) as a toast.
+        self.translation_fallback.connect(
+            lambda msg: show_toast(self, "Translation", msg, "info"))
+        translator.set_fallback_listener(self.translation_fallback.emit)
         self.word_player.index_changed.connect(self._on_player_index)
         self.word_player.part_changed.connect(self._on_player_part)
         self.word_player.state_changed.connect(self._on_player_state)

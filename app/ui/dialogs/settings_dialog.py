@@ -433,10 +433,29 @@ class SettingsDialog(FramelessDialog):
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
 
-        # DeepL
-        deepl = QWidget()
-        form = QFormLayout(deepl)
-        form.setContentsMargins(18, 18, 18, 18)
+        # Translation (Google free / DeepL)
+        translation = QWidget()
+        tr_layout = QVBoxLayout(translation)
+        tr_layout.setContentsMargins(18, 18, 18, 18)
+
+        selector = QFormLayout()
+        self.translation_provider_combo = QComboBox()
+        self.translation_provider_combo.addItem("Google Translate (free)", "google")
+        self.translation_provider_combo.addItem("DeepL", "deepl")
+        current_provider = str(self.settings.get("translation_provider", "google")).strip().lower()
+        self.translation_provider_combo.setCurrentIndex(
+            max(self.translation_provider_combo.findData(current_provider), 0))
+        selector.addRow("Active provider", self.translation_provider_combo)
+        tr_layout.addLayout(selector)
+
+        self.google_note = QLabel("Google Translate is free and needs no API key.")
+        self.google_note.setObjectName("dimLabel")
+        self.google_note.setWordWrap(True)
+        tr_layout.addWidget(self.google_note)
+
+        # DeepL-specific fields, only shown when DeepL is the active provider.
+        self.deepl_group = QGroupBox("DeepL")
+        form = QFormLayout(self.deepl_group)
         form.addRow("API key", self._secret(self._line("api_key")))
         form.addRow("API URL", self._line("api_url"))
         note = QLabel('Get a key at <a href="https://www.deepl.com/pro-api">deepl.com/pro-api</a>. '
@@ -460,7 +479,13 @@ class SettingsDialog(FramelessDialog):
         usage_row.addWidget(self.deepl_usage_bar, 1)
         usage_row.addWidget(self.deepl_usage_label, 1)
         form.addRow("Usage", usage)
-        tabs.addTab(_scrollable(deepl), "DeepL")
+        tr_layout.addWidget(self.deepl_group)
+        tr_layout.addStretch(1)
+
+        self.translation_provider_combo.currentIndexChanged.connect(
+            self._update_translation_provider)
+        self._update_translation_provider()
+        tabs.addTab(_scrollable(translation), "Translation")
 
         # AI (OpenAI / Gemini)
         ai_w = QWidget()
@@ -611,6 +636,12 @@ class SettingsDialog(FramelessDialog):
         except Exception as exc:
             QMessageBox.critical(self, "Supabase", f"Connection test failed:\n{exc}")
 
+    def _update_translation_provider(self):
+        """Show the DeepL fields only when DeepL is the selected provider."""
+        is_deepl = self.translation_provider_combo.currentData() == "deepl"
+        self.deepl_group.setVisible(is_deepl)
+        self.google_note.setVisible(not is_deepl)
+
     def _check_deepl_usage(self):
         """Fetch DeepL quota with the key currently typed in the form."""
         api_key = self.w_api_key.text().strip()
@@ -668,6 +699,7 @@ class SettingsDialog(FramelessDialog):
         updated["hotkey"] = seq.split(", ")[0]  # first chord only
 
         updated["ai_provider"] = self.ai_provider_combo.currentData()
+        updated["translation_provider"] = self.translation_provider_combo.currentData()
 
         save_settings(updated)
 

@@ -76,6 +76,8 @@ DEFAULTS = {
     "txt_include_headers": "True",
     "txt_header_lines": "#separator:tab\\n#html:true\\n",
     "exclude_columns_txt": "ID,Source,Definition,Definition2",
+    # Translation
+    "translation_provider": "google",   # google | deepl
     # DeepL
     "api_key": "",
     "api_url": "https://api.deepl.com/v2/translate",
