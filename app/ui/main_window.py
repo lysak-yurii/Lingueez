@@ -52,7 +52,7 @@ from app.core.data_management import open_words_from_excel
 from app.ui import icons, theme
 from app.ui.animations import AnimatedStackedWidget, crossfade_during, fade_swap
 from app.ui.mini_player import MiniPlayer
-from app.ui.player import PlayerBar, WordPlayer
+from app.ui.player import PlaybackSettingsPopup, PlayerBar, WordPlayer
 from app.ui.texts_page import TextsPage
 from app.ui.stats_page import StatsPage
 from app.ui.toast import show_toast
@@ -592,7 +592,9 @@ class MainWindow(QMainWindow):
         self.player_bar.prev_clicked.connect(self.word_player.prev)
         self.player_bar.toggle_clicked.connect(self.word_player.toggle_pause)
         self.player_bar.next_clicked.connect(self.word_player.next)
+        self.player_bar.config_clicked.connect(self._open_playback_settings)
         self.player_bar.stop_clicked.connect(self.word_player.stop)
+        self._playback_popup = None
 
         # ---------- floating mini player (shown while hidden/minimized) ----------
         self.mini_player = MiniPlayer(self.colors)
@@ -1451,8 +1453,36 @@ class MainWindow(QMainWindow):
         self.player_bar.set_position(0, len(records), records[0].get('Word1', ''))
         self.mini_player.set_paused(False)
         self.mini_player.set_pair(records[0].get('Word1', ''), records[0].get('Word2', ''))
-        self.word_player.play(words, languages)
+        self.word_player.play(
+            words, languages,
+            pause=get_float(self.settings, "playback_pause", 0.5),
+            repeats=get_int(self.settings, "playback_repeats", 1))
         self._sync_mini_player()  # may already be hidden to tray
+
+    def _open_playback_settings(self):
+        """Open the compact pacing popup anchored under the bar's config button.
+
+        Changes are persisted to settings.cfg and applied live to the running
+        session (and used as the snapshot for the next session)."""
+        popup = PlaybackSettingsPopup(
+            get_float(self.settings, "playback_pause", 0.5),
+            get_int(self.settings, "playback_repeats", 1),
+            self)
+
+        def on_pause(value):
+            self.settings["playback_pause"] = f"{value:g}"
+            save_settings(self.settings)
+            self.word_player.set_pause(value)
+
+        def on_repeats(value):
+            self.settings["playback_repeats"] = str(value)
+            save_settings(self.settings)
+            self.word_player.set_repeats(value)
+
+        popup.pause_changed.connect(on_pause)
+        popup.repeats_changed.connect(on_repeats)
+        self._playback_popup = popup  # keep a reference alive
+        popup.popup_at(self.player_bar.config_btn)
 
     def _set_playback_ui(self, active):
         """Show/hide the player bar; the words-only filter chips squash to

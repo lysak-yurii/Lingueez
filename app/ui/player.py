@@ -35,7 +35,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pygame
 from PySide6.QtCore import QObject, QSize, Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QPushButton, QSpinBox,
+    QWidget,
+)
 
 from app.core import audio
 from app.ui import icons
@@ -45,12 +48,15 @@ from app.ui.widgets import ElidedLabel
 class _Session:
     """State of one playback run; a new run gets a fresh session object."""
 
-    def __init__(self, pairs, languages):
+    def __init__(self, pairs, languages, pause=0.5, repeats=1):
         self.pairs = pairs          # [(word, translation), ...]
         self.languages = languages  # [(lang1, lang2), ...]
         self.stop = threading.Event()
         self.cmds = queue.Queue()
         self.paused = False
+        # Pacing — read live each loop so the popup can tune mid-session.
+        self.pause = max(0.0, pause)     # seconds of silence between words/repeats
+        self.repeats = max(1, repeats)   # times each pair plays per pass
 
 
 class WordPlayer(QObject):
@@ -77,13 +83,25 @@ class WordPlayer(QObject):
         session = self._session
         return session is not None and not session.stop.is_set()
 
-    def play(self, pairs, languages):
+    def play(self, pairs, languages, pause=0.5, repeats=1):
         """Start a new session (stops any previous playback first)."""
         self.stop()
         audio.stop_playback()  # halt queue-based playback (texts TTS)
-        session = _Session(pairs, languages)
+        session = _Session(pairs, languages, pause=pause, repeats=repeats)
         self._session = session
         threading.Thread(target=self._run, args=(session,), daemon=True).start()
+
+    def set_pause(self, seconds):
+        """Tune the inter-word pause of the running session (live)."""
+        session = self._session
+        if session is not None:
+            session.pause = max(0.0, seconds)
+
+    def set_repeats(self, count):
+        """Tune the per-pair repeat count of the running session (live)."""
+        session = self._session
+        if session is not None:
+            session.repeats = max(1, count)
 
     def toggle_pause(self):
         self._cmd("toggle")
@@ -120,13 +138,26 @@ class WordPlayer(QObject):
                 except Exception as exc:
                     logging.error(f"Word synthesis failed: {exc}")
                     files = []
-                jump = self._play_word(session, files, i, total)
-                # A word counts as "listened" only when it played to the end:
-                # jump is None (not skipped via next/prev), the session wasn't
-                # stopped, and there was actual audio.
-                if jump is None and not session.stop.is_set() and files:
-                    self.word_completed.emit(i)
-                i = i + 1 if jump is None else jump
+                # Play the pair up to `repeats` times. Each repeat that runs to
+                # the end (jump is None, not stopped, has audio) counts as one
+                # listen. A next/prev jump breaks out immediately and is honored.
+                jump = None
+                repeats = max(1, session.repeats) if files else 1
+                for rep in range(repeats):
+                    jump = self._play_word(session, files, i, total)
+                    if jump is not None:
+                        break
+                    if not session.stop.is_set() and files:
+                        self.word_completed.emit(i)
+                    if rep < repeats - 1 and session.pause:  # gap between repeats
+                        if session.stop.wait(session.pause):
+                            break
+                if jump is None:
+                    if i + 1 < total and session.pause:  # gap before next word
+                        session.stop.wait(session.pause)
+                    i += 1
+                else:
+                    i = jump
         finally:
             session.stop.set()
             executor.shutdown(wait=False, cancel_futures=True)
@@ -232,9 +263,10 @@ class PlayerBar(QWidget):
     prev_clicked = Signal()
     toggle_clicked = Signal()
     next_clicked = Signal()
+    config_clicked = Signal()
     stop_clicked = Signal()
 
-    WORD_WIDTH = 150
+    WORD_WIDTH = 360
 
     def __init__(self, colors, parent=None):
         super().__init__(parent, objectName="PlayerBar")
@@ -245,21 +277,30 @@ class PlayerBar(QWidget):
         lay.setContentsMargins(8, 0, 8, 0)
         lay.setSpacing(2)
 
+        # The bar is right-anchored, so the variable-width metadata lives on the
+        # LEFT (its edge moves with the word length) together with the rarely-used
+        # settings button; the frequently-used transport controls + stop sit on
+        # the fixed RIGHT edge so prev/play/next/stop never shift around.
+        self.config_btn = self._button(
+            "sliders", "text", "Playback settings", self.config_clicked, 15)
+        lay.addWidget(self.config_btn)
+        self.pos_label = QLabel("", objectName="dimLabel")
+        lay.addWidget(self.pos_label)
+        # elidable + collapsible: under width pressure the metadata yields
+        # entirely so the transport controls never force the window to grow
+        # (tooltip / highlighted table row / mini player still show the word)
+        self.word_label = ElidedLabel(min_width=0)
+        self.word_label.setObjectName("PlayerWord")
+        self.word_label.setMaximumWidth(self.WORD_WIDTH)
+        lay.addWidget(self.word_label, 1)
+        lay.addSpacing(6)
+
         self.prev_btn = self._button("skip-back", "text", "Previous word", self.prev_clicked)
         lay.addWidget(self.prev_btn)
         self.play_btn = self._button("pause", "text", "Pause", self.toggle_clicked)
         lay.addWidget(self.play_btn)
         self.next_btn = self._button("skip-forward", "text", "Next word", self.next_clicked)
         lay.addWidget(self.next_btn)
-
-        lay.addSpacing(6)
-        self.pos_label = QLabel("", objectName="dimLabel")
-        lay.addWidget(self.pos_label)
-        # elidable: the pill compresses instead of widening the window
-        self.word_label = ElidedLabel(min_width=36)
-        self.word_label.setObjectName("PlayerWord")
-        self.word_label.setMaximumWidth(self.WORD_WIDTH)
-        lay.addWidget(self.word_label, 1)
 
         self.stop_btn = self._button("x", "danger", "Stop playback", self.stop_clicked, 15)
         lay.addWidget(self.stop_btn)
@@ -287,5 +328,50 @@ class PlayerBar(QWidget):
         self._colors = colors
         self.prev_btn.setIcon(icons.icon("skip-back", colors["text"], 16))
         self.next_btn.setIcon(icons.icon("skip-forward", colors["text"], 16))
+        self.config_btn.setIcon(icons.icon("sliders", colors["text"], 15))
         self.stop_btn.setIcon(icons.icon("x", colors["danger"], 15))
         self.set_paused(self._paused)
+
+
+class PlaybackSettingsPopup(QWidget):
+    """Compact flyout to tune playback pacing: pause between words and repeats.
+
+    Uses Qt.Popup so a click outside dismisses it. Values are emitted on every
+    change so the caller can persist and apply them live.
+    """
+
+    pause_changed = Signal(float)
+    repeats_changed = Signal(int)
+
+    def __init__(self, pause, repeats, parent=None):
+        super().__init__(parent, objectName="PlayerBar")
+        self.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+
+        form = QFormLayout(self)
+        form.setContentsMargins(14, 12, 14, 12)
+        form.setSpacing(8)
+
+        self.pause_spin = QDoubleSpinBox()
+        self.pause_spin.setRange(0, 10)
+        self.pause_spin.setSingleStep(0.1)
+        self.pause_spin.setSuffix(" s")
+        self.pause_spin.setValue(pause)
+        self.pause_spin.valueChanged.connect(self.pause_changed.emit)
+        form.addRow(QLabel("Pause between words"), self.pause_spin)
+
+        self.repeats_spin = QSpinBox()
+        self.repeats_spin.setRange(1, 10)
+        self.repeats_spin.setSuffix("×")
+        self.repeats_spin.setValue(repeats)
+        self.repeats_spin.valueChanged.connect(self.repeats_changed.emit)
+        form.addRow(QLabel("Repeats per word"), self.repeats_spin)
+
+    def popup_at(self, anchor):
+        """Show anchored below ``anchor`` (a widget), right-aligned to it."""
+        self.adjustSize()
+        bottom_right = anchor.mapToGlobal(anchor.rect().bottomRight())
+        x = bottom_right.x() - self.width()
+        y = bottom_right.y() + 6
+        self.move(max(0, x), y)
+        self.show()

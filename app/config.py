@@ -40,6 +40,9 @@ DEFAULTS = {
     "number_of_repeats": "1",
     "max_concurrent_workers": "2",
     "requests_per_sec": "5",
+    # Playback pacing (live word player)
+    "playback_pause": "0.5",               # seconds of silence between words
+    "playback_repeats": "1",               # times each pair is played per pass
     # Playback-driven learning progression (cumulative completed listens per rung)
     "playback_promote": "True",            # promote word status while listening
     "playback_reviewing_listens": "3",     # listens to reach Reviewing

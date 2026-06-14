@@ -43,9 +43,20 @@ class ElidedLabel(QLabel):
     def minimumSizeHint(self):
         return QSize(self._min_width, super().minimumSizeHint().height())
 
+    def sizeHint(self):
+        # Preferred width tracks the FULL text (not the currently elided text),
+        # so a layout keeps offering room to show the whole word; the small
+        # minimumSizeHint still lets it be squeezed. Without this, once the
+        # label elides to nothing it would report a ~0 hint and never grow back.
+        fm = self.fontMetrics()
+        # margin must exceed _refit's 2px so the full text fits without eliding
+        width = fm.horizontalAdvance(self._full) + 8
+        return QSize(max(self._min_width, width), super().sizeHint().height())
+
     def set_full_text(self, text):
         self._full = text or ""
         self.setToolTip(self._full)
+        self.updateGeometry()  # sizeHint depends on _full; re-query the layout
         self._refit()
 
     def resizeEvent(self, event):

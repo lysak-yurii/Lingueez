@@ -359,6 +359,12 @@ class SettingsDialog(FramelessDialog):
         form.addRow("Voice type", self._combo("google_cloud_tts_voice_type", ["standard", "wavenet"]))
         form.addRow("Voice name (optional)", self._line("google_cloud_tts_voice_name"))
 
+        playback_group = QGroupBox("Read Aloud playback")
+        pform = QFormLayout(playback_group)
+        pform.addRow("Pause between words (s)", self._dspin("playback_pause", 0, 10, 0.5))
+        pform.addRow("Repeats per word", self._spin("playback_repeats", 1, 10, 1))
+        form.addRow(playback_group)
+
         note = QLabel("The voice used everywhere words are spoken: in-app Read Aloud "
                       "and MP3 export. gTTS is free and needs no setup. Google Cloud TTS "
                       "needs a service-account JSON key (Cloud Console → IAM & Admin → "
