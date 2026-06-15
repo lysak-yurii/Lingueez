@@ -77,6 +77,10 @@ _ROLE_FOREGROUND = int(Qt.ForegroundRole)
 _ROLE_BACKGROUND = int(Qt.BackgroundRole)
 _ROLE_TEXTALIGN = int(Qt.TextAlignmentRole)
 
+# Color for the thin left accent bar marking favorite rows (None otherwise);
+# public so RowTintDelegate can query it.
+ROLE_FAV_STRIPE = int(Qt.UserRole) + 1
+
 # Metadata columns shown right-aligned (sit against the right edge as
 # secondary info, away from the words).
 _RIGHT_COLS = frozenset((COL_SOURCE, COL_CREATED))
@@ -117,7 +121,7 @@ class WordTableModel(QAbstractTableModel):
 
     def set_colors(self, colors):
         self._colors = colors
-        self._fav_brush = QBrush(QColor(colors["favorite"]))
+        self._fav_stripe = QColor(colors["warning"])
         self._dim_brush = QBrush(QColor(colors["text_dim"]))
         playing = QColor(colors["accent"])
         playing.setAlpha(56)  # subtle tint that reads on both themes
@@ -232,7 +236,11 @@ class WordTableModel(QAbstractTableModel):
                 return self._playing_brush
             if row in self._queued_rows:
                 return self._queued_brush
-            return self._fav_brush if self._favorites[row] else None
+            return None
+        if role == ROLE_FAV_STRIPE:
+            if index.column() == COL_ROWNUM and self._favorites[index.row()]:
+                return self._fav_stripe
+            return None
         return None
 
     def row_record(self, row_index):

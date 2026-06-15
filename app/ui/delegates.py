@@ -30,6 +30,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
 from app.i18n import tr
+from app.ui.word_model import ROLE_FAV_STRIPE
 
 # status -> (base color, background alpha); desaturated hues so the
 # pills read as quiet metadata instead of pulling the eye off the words
@@ -48,9 +49,10 @@ class RowTintDelegate(QStyledItemDelegate):
     """Default table delegate that honors the model's BackgroundRole.
 
     The app stylesheet defines QTableView::item rules, which makes the
-    stylesheet style skip model background brushes entirely — favorite
-    and now-playing row tints would never show. Filling the rect before
-    the styled paint restores them."""
+    stylesheet style skip model background brushes entirely — the
+    now-playing and queued row tints would never show. Filling the rect
+    before the styled paint restores them. Favorite rows are marked
+    afterwards with a thin accent bar at their left edge."""
 
     def paint(self, painter, option, index):
         if not (option.state & QStyle.State_Selected):
@@ -58,6 +60,14 @@ class RowTintDelegate(QStyledItemDelegate):
             if bg is not None:
                 painter.fillRect(option.rect, bg)
         super().paint(painter, option, index)
+        # Favorite marker: a thin accent bar at the row's left edge, drawn
+        # over selection so the cue survives a selected row.
+        stripe = index.data(ROLE_FAV_STRIPE)
+        if stripe is not None:
+            r = option.rect
+            inset = max(3, r.height() // 5)  # keep clear of the row borders
+            painter.fillRect(r.left(), r.top() + inset, 3,
+                             r.height() - 2 * inset, stripe)
 
 
 class StatusPillDelegate(QStyledItemDelegate):
