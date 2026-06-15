@@ -94,7 +94,20 @@ def main():
     settings = load_settings()
     # Must run before importing any UI module: some modules resolve tr() into
     # module-level constants at import time, so the language has to be set first.
-    set_language(settings.get("language", "en"))
+    language = settings.get("language", "en")
+    set_language(language)
+
+    # Standard dialog buttons (Yes/No/OK/Cancel…) are drawn by Qt, not our code,
+    # so tr() never sees them. Install Qt's own bundled translation to localize
+    # them; parented to *app* so it outlives this scope.
+    if language != "en":
+        from PySide6.QtCore import QLibraryInfo, QTranslator
+        qt_translator = QTranslator(app)
+        if qt_translator.load(f"qtbase_{language}",
+                              QLibraryInfo.path(QLibraryInfo.TranslationsPath)):
+            app.installTranslator(qt_translator)
+        else:
+            logging.warning(f"No Qt translation bundled for language '{language}'.")
 
     from app.ui.main_window import MainWindow
 

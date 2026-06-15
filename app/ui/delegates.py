@@ -25,7 +25,7 @@ paint() runs for every visible status cell on every repaint (scrolling,
 resizing, hover), so pills are rendered once per (status, theme, font)
 into a pixmap cache and blitted afterwards.
 """
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle, QStyleOptionViewItem
 
@@ -64,6 +64,21 @@ class StatusPillDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cache = {}  # (text, dark, font key, dpr) -> QPixmap
+
+    def sizeHint(self, option, index):
+        # So resizeColumnToContents() can fit the (localized) pill, not just
+        # the raw status text. Mirrors _render_pill's width plus the 6px left
+        # paint offset and the 10px clip margin used in paint().
+        base = super().sizeHint(option, index)
+        text = str(index.data() or "")
+        if not text:
+            return base
+        font = QFont(option.font)
+        font.setPointSizeF(max(7.0, option.font.pointSizeF() - 1))
+        font.setWeight(QFont.Normal)
+        metrics = QFontMetrics(font)
+        pill_w = metrics.horizontalAdvance(tr(text)) + 20
+        return QSize(pill_w + 16, max(base.height(), metrics.height() + 12))
 
     def paint(self, painter, option, index):
         text = str(index.data() or "")  # canonical (English) status — drives the color

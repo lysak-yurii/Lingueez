@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
-from app.i18n import ntr, tr
+from app.i18n import month_abbr, ntr, tr
 from app.ui import icons
 from app.ui.workers import run_in_thread
 
@@ -60,7 +60,7 @@ def humanize_time(iso_str):
         return tr("today {time}").format(time=moment.strftime('%H:%M'))
     if (now.date() - moment.date()).days == 1:
         return tr("yesterday {time}").format(time=moment.strftime('%H:%M'))
-    return moment.strftime("%d %b %Y, %H:%M")
+    return f"{moment.day:02d} {month_abbr(moment)} {moment.year}, {moment.strftime('%H:%M')}"
 
 
 class SyncPopover(QFrame):
@@ -74,6 +74,7 @@ class SyncPopover(QFrame):
         self.setAttribute(Qt.WA_TranslucentBackground)  # rounded corners
         self._colors = colors
         self._request = 0  # bumps on every show/hide; stale-result guard
+        self._anchor = None  # button to re-anchor against when content resizes
         self.setMinimumWidth(280)
 
         lay = QVBoxLayout(self)
@@ -134,16 +135,9 @@ class SyncPopover(QFrame):
         self.sync_btn.setEnabled(not syncing)
         self.sync_btn.setText(tr("Syncing…") if syncing else tr("Sync Now"))
 
+        self._anchor = button
         self.adjustSize()
-        corner = button.mapToGlobal(QPoint(button.width(), button.height()))
-        x = corner.x() - self.width()          # right edges aligned
-        y = corner.y() + 6
-        screen = self.screen().availableGeometry() if self.screen() else None
-        if screen:
-            x = max(screen.left() + 4, min(x, screen.right() - self.width() - 4))
-            if y + self.height() > screen.bottom() - 4:  # no room: flip above
-                y = button.mapToGlobal(QPoint(0, 0)).y() - self.height() - 6
-        self.move(QPoint(x, y))
+        self._reposition()
         self.show()
 
         request = self._request
@@ -157,6 +151,32 @@ class SyncPopover(QFrame):
                 self._show_error(message)
 
         run_in_thread(fetch_status, on_result=done, on_error=fail)
+
+    def _reposition(self):
+        """Anchor under the cloud button, right edges aligned, kept on-screen."""
+        if not self._anchor:
+            return
+        button = self._anchor
+        corner = button.mapToGlobal(QPoint(button.width(), button.height()))
+        x = corner.x() - self.width()          # right edges aligned
+        y = corner.y() + 6
+        screen = self.screen().availableGeometry() if self.screen() else None
+        if screen:
+            x = max(screen.left() + 4, min(x, screen.right() - self.width() - 4))
+            if y + self.height() > screen.bottom() - 4:  # no room: flip above
+                y = button.mapToGlobal(QPoint(0, 0)).y() - self.height() - 6
+        self.move(QPoint(x, y))
+
+    def _resize_to_content(self):
+        """Re-fit to the current text. The status arrives asynchronously, so
+        the layout must be recomputed *before* adjustSize — otherwise the
+        bubble keeps its placeholder-sized width and clips longer strings
+        (e.g. the Ukrainian 'все синхронізовано'). Re-anchor afterwards, since
+        the right edge must stay aligned to the button as the width grows."""
+        self.layout().invalidate()
+        self.layout().activate()
+        self.adjustSize()
+        self._reposition()
 
     def refresh_theme(self, colors):
         self._colors = colors
@@ -217,7 +237,7 @@ class SyncPopover(QFrame):
         if not info.get("first_sync_completed"):
             self.note_label.setText(tr("Initial sync has not completed yet."))
             self.note_label.setVisible(True)
-        self.adjustSize()
+        self._resize_to_content()
 
     def _show_error(self, message):
         self._set_value("status", "Error", color=self._colors["danger"])
@@ -225,7 +245,7 @@ class SyncPopover(QFrame):
         self._set_value("pending", "—", dim=True)
         self.note_label.setText(message)
         self.note_label.setVisible(True)
-        self.adjustSize()
+        self._resize_to_content()
 
     def _on_sync_clicked(self):
         self.hide()

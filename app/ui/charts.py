@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui import theme
-from app.i18n import tr
+from app.i18n import month_abbr, ntr, tr, weekday_abbr_by_index
 
 
 # --------------------------------------------------------------------------- #
@@ -523,7 +523,7 @@ class AreaChart(_Animated, QWidget):
         p.setFont(_label_font(8))
         for i, al in ((0, Qt.AlignLeft), (n // 2, Qt.AlignHCenter), (n - 1, Qt.AlignRight)):
             d = self._points[i][0]
-            label = d.strftime("%d %b") if hasattr(d, "strftime") else str(d)
+            label = f"{d.day:02d} {month_abbr(d)}" if hasattr(d, "strftime") else str(d)
             x = area.left() + area.width() * (i / (n - 1))
             if al == Qt.AlignLeft:
                 box = QRectF(x, area.bottom() + 6, 80, 16)
@@ -559,9 +559,10 @@ class AreaChart(_Animated, QWidget):
             self._hover = i
             self.update()
         d, c = self._points[i]
-        label = d.strftime("%d %b %Y") if hasattr(d, "strftime") else str(d)
+        label = f"{d.day:02d} {month_abbr(d)} {d.year}" if hasattr(d, "strftime") else str(d)
+        noun = ntr(c, tr("word"), tr("words"), tr("words"))
         QToolTip.showText(event.globalPosition().toPoint(),
-                          f"{c:,} word{'s' if c != 1 else ''}\n{label}", self)
+                          f"{c:,} {noun}\n{label}", self)
 
     def leaveEvent(self, event):  # noqa: N802
         if self._hover != -1:
@@ -622,10 +623,10 @@ class ActivityHeatmap(_Animated, QWidget):
         # weekday labels (Mon / Wed / Fri)
         p.setFont(_label_font(8))
         p.setPen(_c("text_dim"))
-        for row, name in ((0, "Mon"), (2, "Wed"), (4, "Fri")):
+        for row in (0, 2, 4):  # Mon / Wed / Fri
             y = self.TOP + row * step
             p.drawText(QRectF(0, y, self.LEFT - 6, self.CELL),
-                       Qt.AlignVCenter | Qt.AlignRight, name)
+                       Qt.AlignVCenter | Qt.AlignRight, weekday_abbr_by_index(row))
 
         # month labels
         for col, name in self._grid.get("month_labels", []):
@@ -659,10 +660,11 @@ class ActivityHeatmap(_Animated, QWidget):
             cell = cols[ci][ri]
             if cell is not None:
                 d, count = cell
-                label = d.strftime("%d %b %Y") if hasattr(d, "strftime") else str(d)
+                label = f"{d.day:02d} {month_abbr(d)} {d.year}" if hasattr(d, "strftime") else str(d)
+                noun = ntr(count, tr("word"), tr("words"), tr("words"))
                 QToolTip.showText(
                     event.globalPosition().toPoint(),
-                    f"{count:,} word{'s' if count != 1 else ''}  ·  {label}", self)
+                    f"{count:,} {noun}  ·  {label}", self)
                 return
         QToolTip.hideText()
 

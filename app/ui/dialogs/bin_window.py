@@ -25,13 +25,13 @@ from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabWidget,
+    QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QTabWidget,
     QTableWidget, QTableWidgetItem, QAbstractItemView,
 )
 
 from app.config import get_int, load_settings
 from app.core.supabase_client import SupabaseClient
-from app.i18n import tr
+from app.i18n import lang_label, tr
 from app.ui.dialogs.base import FramelessDialog
 
 
@@ -103,7 +103,11 @@ class BinWindow(FramelessDialog):
         table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.verticalHeader().setVisible(False)
-        table.horizontalHeader().setStretchLastSection(True)
+        header = table.horizontalHeader()
+        # Size each column to its header/content so labels aren't clipped
+        # (e.g. "Translation language"); the last column fills the remainder.
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setStretchLastSection(True)
         return table
 
     def load_data(self):
@@ -115,8 +119,8 @@ class BinWindow(FramelessDialog):
                 self.words_table.insertRow(row)
                 for col, value in enumerate([
                         word.get('ID') or word.get('id'), word.get('Word1', ''),
-                        word.get('Word2', ''), word.get('Language1', ''),
-                        word.get('Language2', ''), _fmt_date(word.get('deleted_at'))]):
+                        word.get('Word2', ''), lang_label(word.get('Language1', '')),
+                        lang_label(word.get('Language2', '')), _fmt_date(word.get('deleted_at'))]):
                     self.words_table.setItem(row, col, QTableWidgetItem(str(value)))
 
             texts = self.supabase.get_all_soft_deleted_items('texts')
@@ -126,7 +130,7 @@ class BinWindow(FramelessDialog):
                 self.texts_table.insertRow(row)
                 for col, value in enumerate([
                         text.get('ID') or text.get('id'), text.get('Title', ''),
-                        text.get('Language', ''), text.get('Category', ''),
+                        lang_label(text.get('Language', '')), text.get('Category', ''),
                         _fmt_date(text.get('deleted_at'))]):
                     self.texts_table.setItem(row, col, QTableWidgetItem(str(value)))
         except Exception as exc:

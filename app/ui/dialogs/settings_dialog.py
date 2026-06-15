@@ -214,7 +214,7 @@ class SettingsDialog(FramelessDialog):
         widget = QWidget()
         form = QFormLayout(widget)
         form.setContentsMargins(18, 18, 18, 18)
-        form.addRow(tr("Appearance mode"), self._combo("appearance_mode", ["System", "Light", "Dark"]))
+        form.addRow(tr("Appearance mode"), self._combo("appearance_mode", ["System", "Light", "Dark"], display=tr))
         form.addRow(tr("Widget scaling"), self._dspin("widget_scaling", 0.5, 3.0, 1.0))
         self.settings.setdefault("table_density", TABLE_DENSITY_DEFAULT)
         form.addRow(tr("Table size"), self._combo("table_density", list(TABLE_DENSITY.keys()), TABLE_DENSITY_DEFAULT, display=tr))

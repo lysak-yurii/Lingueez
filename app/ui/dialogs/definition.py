@@ -90,7 +90,7 @@ class DefinitionDialog(FramelessDialog):
         self.switch_btn.clicked.connect(self.switch_definition)
         buttons.addWidget(self.switch_btn)
 
-        self.generate_btn = QPushButton(tr("Generate with {ai}").format(ai=self.ai_label))
+        self.generate_btn = QPushButton(tr("Generate with AI"))
         self.generate_btn.clicked.connect(self.generate_definition)
         buttons.addWidget(self.generate_btn)
 
@@ -145,11 +145,11 @@ class DefinitionDialog(FramelessDialog):
         self.sub_label.setText(f"{lang} · {def_label}")
         if definition:
             self.text.setHtml(markup_to_html(str(definition)))
-            self.generate_btn.setText(tr("Regenerate with {ai}").format(ai=self.ai_label))
+            self.generate_btn.setText(tr("Regenerate with AI"))
         else:
             self.text.setHtml(
-                f"<i>{tr('No definition stored yet. Use \"Generate with {ai}\" or \"Edit\" to add one.').format(ai=self.ai_label)}</i>")
-            self.generate_btn.setText(tr("Generate with {ai}").format(ai=self.ai_label))
+                f"<i>{tr('No definition stored yet. Use \"Generate with AI\" or \"Edit\" to add one.')}</i>")
+            self.generate_btn.setText(tr("Generate with AI"))
         if self.current_field == 'Word2':
             self.switch_btn.setText(tr("Show word's definition"))
         else:

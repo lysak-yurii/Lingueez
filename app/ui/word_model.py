@@ -46,6 +46,23 @@ COL_WORD2 = 6
 COL_SOURCE = 7
 COL_CREATED = 8
 
+# Raw Source tags -> human-readable English labels (localized for display).
+# Unknown tags fall back to a title-cased form of the raw value.
+SOURCE_LABELS = {
+    "manual": "Added manually",
+    "reader": "From reader",
+    "excel_import": "Excel import",
+}
+
+
+def source_label(value):
+    """Friendly, localized label for a word's Source tag."""
+    raw = _fmt(value).strip()
+    if not raw:
+        return ""
+    english = SOURCE_LABELS.get(raw.lower(), raw.replace("_", " ").capitalize())
+    return tr(english)
+
 EMPTY_DF_COLUMNS = ["ID", "Status", "Language1", "Word1", "Language2", "Word2",
                     "Source", "created_at", "edited_at", "favorite"]
 
@@ -58,6 +75,12 @@ _ROLE_DISPLAY = int(Qt.DisplayRole)
 _ROLE_EDIT = int(Qt.EditRole)
 _ROLE_FOREGROUND = int(Qt.ForegroundRole)
 _ROLE_BACKGROUND = int(Qt.BackgroundRole)
+_ROLE_TEXTALIGN = int(Qt.TextAlignmentRole)
+
+# Metadata columns shown right-aligned (sit against the right edge as
+# secondary info, away from the words).
+_RIGHT_COLS = frozenset((COL_SOURCE, COL_CREATED))
+_ALIGN_RIGHT = int(Qt.AlignRight | Qt.AlignVCenter)
 
 
 def _fmt(value):
@@ -110,7 +133,7 @@ class WordTableModel(QAbstractTableModel):
         self._rows = [
             (_fmt(t.ID), None, _fmt(t.Status), lang_label(_fmt(t.Language1)),
              _fmt(t.Word1), lang_label(_fmt(t.Language2)), _fmt(t.Word2),
-             _fmt(t.Source), _fmt(t.created_at)[:19])
+             source_label(t.Source), _fmt(t.created_at)[:19])
             for t in self._df.itertuples(index=False)
         ]
         self._favorites = self._df["favorite"].fillna(0).astype(bool).tolist()
@@ -187,6 +210,8 @@ class WordTableModel(QAbstractTableModel):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
             override = self._header_overrides.get(section)
             return HEADERS[section] if override is None else override
+        if orientation == Qt.Horizontal and role == Qt.TextAlignmentRole:
+            return _ALIGN_RIGHT if section in _RIGHT_COLS else None
         return None
 
     def data(self, index, role=_ROLE_DISPLAY):
@@ -199,6 +224,8 @@ class WordTableModel(QAbstractTableModel):
             return self._rows[row][col]
         if role == _ROLE_FOREGROUND:
             return self._dim_brush if index.column() in _DIM_COLS else None
+        if role == _ROLE_TEXTALIGN:
+            return _ALIGN_RIGHT if index.column() in _RIGHT_COLS else None
         if role == _ROLE_BACKGROUND:
             row = index.row()
             if row == self._playing_row:

@@ -208,7 +208,7 @@ class AddTextDialog(FramelessDialog):
         row.addWidget(self.length_combo)
         row.addStretch(1)
         self.generate_btn = QPushButton(
-            tr("Generate with {ai}").format(ai=ai.provider_label()),
+            tr("Generate with AI"),
             objectName="primaryButton")
         self.generate_btn.setIcon(icons.icon("sparkles",
                                              self.colors["accent_text"], 16))

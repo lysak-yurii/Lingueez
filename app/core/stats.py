@@ -37,7 +37,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from app.i18n import lang_label
+from app.i18n import lang_label, month_abbr
 
 # Canonical status ordering for the donut. The DB may hold statuses outside
 # this list (older imports, custom values); those are appended afterwards so
@@ -358,7 +358,7 @@ def heatmap_weeks(daily: list, weeks: int = 27) -> dict:
             cur += timedelta(days=1)
         # month label when the month changes at the top of a column
         top = columns and None  # noop placeholder
-        month_of_col = (start + timedelta(days=col * 7)).strftime("%b")
+        month_of_col = month_abbr(start + timedelta(days=col * 7))
         month_num = (start + timedelta(days=col * 7)).month
         if month_num != last_month:
             month_labels.append((col, month_of_col))

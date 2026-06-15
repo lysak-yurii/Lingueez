@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
-from app.i18n import ntr, tr
+from app.i18n import full_date, month_abbr, ntr, tr, weekday_name
 from app.ui.dialogs.base import FramelessDialog
 
 BACKUP_DIR = 'backups'
@@ -64,13 +64,13 @@ def _friendly_date(date):
     """A backup date -> a plain-language label ('Today', 'Monday · June 9, 2026')."""
     today = datetime.now().date()
     days = (today - date.date()).days
-    full = f"{date.strftime('%B')} {date.day}, {date.year}"
+    full = full_date(date)
     if days <= 0:
         return tr("Today")
     if days == 1:
         return tr("Yesterday")
     if days < 7:
-        return f"{date.strftime('%A')} · {full}"
+        return f"{weekday_name(date)} · {full}"
     return full
 
 
@@ -78,13 +78,13 @@ def _date_phrase(date):
     """A backup date -> a phrase that reads naturally inside a sentence."""
     today = datetime.now().date()
     days = (today - date.date()).days
-    full = f"{date.strftime('%B')} {date.day}, {date.year}"
+    full = full_date(date)
     if days <= 0:
         return tr("today")
     if days == 1:
         return tr("yesterday")
     if days < 7:
-        return f"{date.strftime('%A')}, {full}"
+        return f"{weekday_name(date)}, {full}"
     return full
 
 
@@ -97,7 +97,7 @@ def _short_when(moment):
         return tr("today {time}").format(time=time)
     if days == 1:
         return tr("yesterday {time}").format(time=time)
-    return f"{moment.strftime('%b')} {moment.day} {time}"
+    return f"{month_abbr(moment)} {moment.day} {time}"
 
 
 def _content_summary(words, texts, tags):

@@ -134,6 +134,8 @@ TRANSLATIONS: dict[str, str] = {
     "Audio": "Аудіо",
     "Learning": "Вивчення",
     "System": "Система",
+    "Light": "Світла",
+    "Dark": "Темна",
     "Appearance mode": "Режим вигляду",
     "Widget scaling": "Масштаб елементів",
     "Table size": "Розмір таблиці",
@@ -224,10 +226,10 @@ TRANSLATIONS: dict[str, str] = {
     # ── definition.py ──────────────────────────────────────────────────────
     "Show translation's definition": "Показати визначення перекладу",
     "Show word's definition": "Показати визначення слова",
-    "Generate with {ai}": "Генерувати за допомогою {ai}",
-    "Regenerate with {ai}": "Перегенерувати за допомогою {ai}",
+    "Generate with AI": "Згенерувати за допомогою ШІ",
+    "Regenerate with AI": "Перегенерувати за допомогою ШІ",
     "Definition 2": "Визначення 2",
-    "No definition stored yet. Use \"Generate with {ai}\" or \"Edit\" to add one.": "Визначення ще не додано. Використайте «Генерувати за допомогою {ai}» або «Редагувати».",
+    "No definition stored yet. Use \"Generate with AI\" or \"Edit\" to add one.": "Визначення ще не додано. Використайте «Згенерувати за допомогою ШІ» або «Редагувати».",
     "There is no word to define.": "Немає слова для визначення.",
     "API key missing": "Відсутній ключ API",
     "Set your {ai} API key in Settings → APIs → AI first.": "Спочатку вкажіть ключ {ai} у Налаштуваннях → APIs → AI.",
@@ -251,7 +253,7 @@ TRANSLATIONS: dict[str, str] = {
 
     # ── bin_window.py ──────────────────────────────────────────────────────
     "Bin — Deleted Items": "Кошик — Видалені елементи",
-    "Deleted at": "Видалено о",
+    "Deleted at": "Дата видалення",
     "Restore Selected": "Відновити вибрані",
     "Delete Permanently": "Видалити назавжди",
     "Cleanup Old Items…": "Очистити старі елементи…",
@@ -403,6 +405,8 @@ TRANSLATIONS: dict[str, str] = {
 
     # ── word_model.py ──────────────────────────────────────────────────────
     "Source": "Джерело",
+    "Added manually": "Додано вручну",
+    "From reader": "З читанки",
     "Created at": "Дата створення",
 
     # ── word_popup.py ──────────────────────────────────────────────────────
@@ -1000,3 +1004,14 @@ TRANSLATIONS: dict[str, str] = {
     "Yoruba": "Йоруба",
     "Zulu": "Зулуська",
 }
+
+# Date names, read by app.i18n. Months are in the genitive case because they
+# only appear in formatted dates ("13 червня 2026"). Weekdays start on Monday
+# (datetime.weekday(): 0 = Monday).
+MONTHS = ["січня", "лютого", "березня", "квітня", "травня", "червня",
+          "липня", "серпня", "вересня", "жовтня", "листопада", "грудня"]
+MONTHS_ABBR = ["січ", "лют", "бер", "кві", "тра", "чер",
+               "лип", "сер", "вер", "жов", "лис", "гру"]
+WEEKDAYS = ["Понеділок", "Вівторок", "Середа", "Четвер",
+            "П'ятниця", "Субота", "Неділя"]
+WEEKDAYS_ABBR = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]

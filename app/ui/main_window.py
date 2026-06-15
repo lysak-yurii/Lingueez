@@ -670,10 +670,15 @@ class MainWindow(QMainWindow):
             # +56: room for the embedded filter combo's chevron + paddings
             return max(minimum, hfm.horizontalAdvance(HEADERS[col]) + 56)
 
+        # Minimum width per meta column (must clear the embedded filter combo);
+        # _fit_meta_columns() grows these to fit localized cell content at start.
+        self._meta_col_min = {COL_STATUS: header_width(COL_STATUS, 116),
+                              COL_LANG1: header_width(COL_LANG1, 110),
+                              COL_LANG2: header_width(COL_LANG2, 110)}
+        self._meta_fitted = False
         self.table.setColumnWidth(1, 46)
-        self.table.setColumnWidth(COL_STATUS, header_width(COL_STATUS, 116))
-        self.table.setColumnWidth(COL_LANG1, header_width(COL_LANG1, 110))
-        self.table.setColumnWidth(COL_LANG2, header_width(COL_LANG2, 110))
+        for col, width in self._meta_col_min.items():
+            self.table.setColumnWidth(col, width)
         self.table.setColumnHidden(COL_SOURCE, True)
         self.table.setColumnHidden(COL_CREATED, True)
 
@@ -773,6 +778,18 @@ class MainWindow(QMainWindow):
             self._fit_word_columns()
         else:
             self._col_fit_timer.start()
+
+    def _fit_meta_columns(self):
+        """Size the Status / Language / Translation columns to their content
+        once, so localized labels (e.g. 'Переглянуто', 'Англійська') aren't
+        clipped on launch. Columns stay user-resizable (Interactive) afterwards."""
+        for col in (COL_STATUS, COL_LANG1, COL_LANG2):
+            if self.table.isColumnHidden(col):
+                continue
+            self.table.resizeColumnToContents(col)        # uses delegate sizeHint
+            width = max(self.table.columnWidth(col), self._meta_col_min[col])
+            self.table.setColumnWidth(col, min(width, 320))  # cap runaway widths
+        self._fit_word_columns()
 
     def _fit_word_columns(self):
         self._col_fit_timer.stop()
@@ -1209,6 +1226,13 @@ class MainWindow(QMainWindow):
         filtered = wf.apply(self.df)
         self.model.set_dataframe(filtered)
 
+        # Fit the meta columns to content once, after the first rows arrive;
+        # done here (not at construction) because resizeColumnToContents needs
+        # populated rows. User resizing afterwards is preserved.
+        if not self._meta_fitted and len(filtered):
+            self._meta_fitted = True
+            QTimer.singleShot(0, self._fit_meta_columns)
+
         total = len(self.df)
         words_text = tr("Words: {shown}/{total}").format(shown=len(filtered), total=total)
         if wf.row_limit is not None:
@@ -1233,10 +1257,14 @@ class MainWindow(QMainWindow):
 
     def toggle_source_column(self, checked):
         self.table.setColumnHidden(COL_SOURCE, not checked)
+        if checked:
+            self.table.resizeColumnToContents(COL_SOURCE)
         self._fit_word_columns()
 
     def toggle_created_column(self, checked):
         self.table.setColumnHidden(COL_CREATED, not checked)
+        if checked:
+            self.table.resizeColumnToContents(COL_CREATED)
         self._fit_word_columns()
 
     def prompt_row_limit(self):
