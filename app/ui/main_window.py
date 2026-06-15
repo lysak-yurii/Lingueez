@@ -254,6 +254,8 @@ class MainWindow(QMainWindow):
         self.word_player.state_changed.connect(self._on_player_state)
         self.word_player.word_completed.connect(self._on_word_completed)
         self.word_player.finished.connect(self._on_player_finished)
+        self.word_player.synthesis_warning.connect(
+            lambda msg: show_toast(self, tr("Read aloud"), msg, "warning", 6000))
         # playback-driven status progression (settings snapshot per session)
         self._promote_on_play = True
         self._thresholds = progression.normalize_thresholds()

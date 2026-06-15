@@ -231,6 +231,7 @@ class TextsPage(QWidget):
         self.reader.word_changed.connect(self._on_word_changed)
         self.reader.finished.connect(self._reading_finished)
         self.reader.error.connect(self._on_reader_error)
+        self.reader.read_warning.connect(self._on_reader_error)
         self.reader_bar.prev_clicked.connect(self.reader.prev_sentence)
         self.reader_bar.toggle_clicked.connect(self.reader.toggle_pause)
         self.reader_bar.next_clicked.connect(self.reader.next_sentence)

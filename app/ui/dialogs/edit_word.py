@@ -72,6 +72,11 @@ class EditWordDialog(FramelessDialog):
         grid.setColumnStretch(1, 1)
         layout.addLayout(grid)
 
+        self.info_label = QLabel(objectName="dimLabel")
+        self.info_label.setWordWrap(True)
+        self.info_label.setVisible(False)
+        layout.addWidget(self.info_label)
+
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         cancel_btn = QPushButton(tr("Cancel"))
@@ -81,6 +86,25 @@ class EditWordDialog(FramelessDialog):
         save_btn.clicked.connect(self.accept)
         btn_row.addWidget(save_btn)
         layout.addLayout(btn_row)
+
+    def _info(self, message):
+        self.info_label.setText(message)
+        self.info_label.setVisible(bool(message))
+
+    def accept(self):
+        from app.core.audio import is_language_supported
+        for combo, word_edit in (
+            (self.lang1_combo, self.word1_edit),
+            (self.lang2_combo, self.word2_edit),
+        ):
+            lang = get_lang(combo).strip()
+            # Only enforce on the side that actually has a word to speak.
+            if word_edit.text().strip() and not is_language_supported(lang):
+                self._info(tr("Unsupported language: {lang}. Pick one from the list.")
+                           .format(lang=lang or tr("(empty)")))
+                combo.setFocus()
+                return
+        super().accept()
 
     def result_data(self):
         return {

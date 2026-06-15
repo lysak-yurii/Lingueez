@@ -496,6 +496,16 @@ TRANSLATIONS: dict[str, str] = {
     "Delete Text": "Видалити текст",
     "Delete '{title}'?": "Видалити «{title}»?",
     "Unsupported language: {language}": "Непідтримувана мова: {language}",
+    "Unsupported language: {lang}. Pick one from the list.":
+        "Непідтримувана мова: {lang}. Виберіть одну зі списку.",
+    "(empty)": "(порожньо)",
+    "unsupported language": "непідтримувана мова",
+    "unreadable text": "нечитабельний текст",
+    "Skipped {n} {noun} ({reasons}).": "Пропущено {n} {noun} ({reasons}).",
+    "Some text couldn't be read aloud — unsupported language "
+    "or unreadable characters.":
+        "Деякий текст не вдалося озвучити — непідтримувана мова "
+        "або нечитабельні символи.",
     "Edit text": "Редагувати текст",
     "Done editing": "Завершити редагування",
     "Delete text": "Видалити текст",

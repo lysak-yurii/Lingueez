@@ -131,6 +131,7 @@ class ReaderPlayer(QObject):
     progress_changed = Signal(int, int)  # current chunk index, total chunks
     finished = Signal()                # session over (natural end or stop)
     error = Signal(str)                # user-facing failure message
+    read_warning = Signal(str)         # non-fatal: some chunk couldn't be read
 
     _chunk_ready = Signal(int, int, str)  # generation, index, path ("" = failed)
 
@@ -166,6 +167,7 @@ class ReaderPlayer(QObject):
         self._paused = False
         self._rate = 1.0
         self._leftovers = set()  # temp files that could not be deleted yet
+        self._warned_failed = False  # warned about a failed chunk this session
 
     # ------------------------------------------------------------- public
 
@@ -190,6 +192,7 @@ class ReaderPlayer(QObject):
         self._generation += 1
         generation = self._generation
         self._active = True
+        self._warned_failed = False
         self._chunks = chunks
         self._files = [None] * len(chunks)
         self._cancel = threading.Event()
@@ -289,6 +292,11 @@ class ReaderPlayer(QObject):
         self._files[index] = path or _FAILED
         if not path:
             logging.warning(f"Reader: skipping chunk {index} (synthesis failed)")
+            if not self._warned_failed:
+                self._warned_failed = True
+                self.read_warning.emit(tr(
+                    "Some text couldn't be read aloud — unsupported language "
+                    "or unreadable characters."))
         if self._waiting and index == self._index:
             if path:
                 self._load_current()

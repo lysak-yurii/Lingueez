@@ -100,6 +100,11 @@ all_temp_files = set()
 temp_files_lock = threading.Lock()
 
 
+def is_language_supported(name):
+    """True if *name* (canonical English language name) can be synthesized."""
+    return name in lang_codes
+
+
 def get_tts_settings():
     """Return (provider, credentials_path, voice_type, voice_name)."""
     settings = load_settings()

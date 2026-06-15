@@ -31,6 +31,7 @@ import logging
 import os
 import queue
 import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 import pygame
@@ -41,7 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core import audio
-from app.i18n import tr
+from app.i18n import ntr, tr
 from app.ui import icons
 from app.ui.widgets import ElidedLabel
 
@@ -55,6 +56,10 @@ class _Session:
         self.stop = threading.Event()
         self.cmds = queue.Queue()
         self.paused = False
+        # Reasons words were skipped during synthesis (filled from worker
+        # threads, so guarded by a lock); summarized once when the run ends.
+        self.skipped = Counter()
+        self.skipped_lock = threading.Lock()
         # Pacing — read live each loop so the popup can tune mid-session.
         self.pause = max(0.0, pause)     # seconds of silence between words/repeats
         self.repeats = max(1, repeats)   # times each pair plays per pass
@@ -72,6 +77,7 @@ class WordPlayer(QObject):
     state_changed = Signal(bool)  # True = paused
     word_completed = Signal(int)  # a word finished playing in full (not skipped)
     finished = Signal()           # session ended (natural end or stop)
+    synthesis_warning = Signal(str)  # some words couldn't be synthesized
 
     _mixer_lock = threading.Lock()  # pygame.mixer.music is not thread-safe
 
@@ -170,6 +176,15 @@ class WordPlayer(QObject):
                     except Exception:
                         pass
             if self._session is session:
+                with session.skipped_lock:
+                    skipped = dict(session.skipped)
+                if skipped:
+                    total = sum(skipped.values())
+                    noun = ntr(total, tr("word"), tr("words"), tr("words"))
+                    reasons = ", ".join(skipped)
+                    self.synthesis_warning.emit(
+                        tr("Skipped {n} {noun} ({reasons}).").format(
+                            n=total, noun=noun, reasons=reasons))
                 self.finished.emit()
 
     def _synthesize(self, session, i):
@@ -181,7 +196,10 @@ class WordPlayer(QObject):
             if session.stop.is_set():
                 break
             text = str(text or "").strip()
-            if not text or lang not in audio.lang_codes:
+            if not text:
+                continue
+            if lang not in audio.lang_codes:
+                self._note_skip(session, tr("unsupported language"))
                 continue
             filename = audio.synthesize_speech(
                 text, audio.lang_codes[lang], cancellation_event=session.stop)
@@ -189,7 +207,14 @@ class WordPlayer(QObject):
                 files.append((slot, filename))
                 with audio.temp_files_lock:
                     audio.all_temp_files.add(filename)
+            elif not session.stop.is_set():
+                self._note_skip(session, tr("unreadable text"))
         return files
+
+    @staticmethod
+    def _note_skip(session, reason):
+        with session.skipped_lock:
+            session.skipped[reason] += 1
 
     def _play_word(self, session, files, i, total):
         """Play one word's files; returns a jump index or None to advance."""
