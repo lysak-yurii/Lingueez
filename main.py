@@ -70,7 +70,7 @@ def main():
     app.setApplicationName(APP_ID)
     app.setApplicationDisplayName(APP_NAME)
     app.setDesktopFileName(APP_ID)
-    app.setWindowIcon(QIcon("icon.png"))
+    app.setWindowIcon(QIcon("assets/icons/icon.png"))
     app.setQuitOnLastWindowClosed(False)  # we live in the tray
 
     # Single instance guard. Keep the lock in a stable, writable runtime dir

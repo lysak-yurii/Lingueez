@@ -201,7 +201,7 @@ class MainWindow(QMainWindow):
         self._themed_icons = []  # (target, name, color_key, size) for re-tinting
 
         self.setWindowTitle(APP_NAME)
-        self.setWindowIcon(QIcon("icon.png"))
+        self.setWindowIcon(QIcon("assets/icons/icon.png"))
         # Client-side decorations: window controls live in the app's top bar
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         load_geometry(self, "main_window")
@@ -930,7 +930,9 @@ class MainWindow(QMainWindow):
     def _build_tray(self):
         from PySide6.QtWidgets import QSystemTrayIcon
 
-        self.tray = QSystemTrayIcon(QIcon("icon.png"), self)
+        # Tray uses a dedicated icon so the top-panel/notification-area glyph can
+        # differ from the launcher and window icons (which stay on icon.png).
+        self.tray = QSystemTrayIcon(QIcon("assets/icons/tray_icon.png"), self)
         self.tray.setToolTip(APP_NAME)
         menu = QMenu()
         menu.addAction(tr("Show"), self.show_window)
