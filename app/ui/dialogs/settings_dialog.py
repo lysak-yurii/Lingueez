@@ -146,8 +146,8 @@ class SettingsDialog(FramelessDialog):
         setattr(self, f"w_{key}", spin)
         return spin
 
-    def _check(self, key, default=False):
-        box = QCheckBox()
+    def _check(self, key, default=False, label=""):
+        box = QCheckBox(label)
         box.setChecked(get_bool(self.settings, key, default))
         setattr(self, f"w_{key}", box)
         return box
@@ -603,11 +603,6 @@ class SettingsDialog(FramelessDialog):
         self.autostart_check = QCheckBox(tr("Start automatically on login (minimized to tray)"))
         self.autostart_check.setChecked(get_autostart_enabled())
         form.addRow(self.autostart_check)
-        autostart_note = QLabel(tr("Autostart launches the app with the --minimized flag, so it "
-                                   "begins hidden in the tray."))
-        autostart_note.setObjectName("dimLabel")
-        autostart_note.setWordWrap(True)
-        form.addRow(autostart_note)
 
         self.hotkey_edit = QKeySequenceEdit(
             QKeySequence(self.settings.get("hotkey", "Ctrl+Shift+V")))
@@ -624,10 +619,10 @@ class SettingsDialog(FramelessDialog):
         hotkey_note.setWordWrap(True)
         form.addRow(hotkey_note)
 
-        form.addRow(tr("Check for updates on startup"),
-                    self._check("auto_check_updates", True))
-        updates_note = QLabel(tr("Checks GitHub for a newer release once a day and notifies you; "
-                                 "it never downloads or installs anything automatically."))
+        form.addRow(self._check("auto_check_updates", True,
+                                tr("Check for updates on startup")))
+        updates_note = QLabel(tr("Checks once a day for a newer version and lets you know; "
+                                 "nothing is ever downloaded or installed automatically."))
         updates_note.setObjectName("dimLabel")
         updates_note.setWordWrap(True)
         form.addRow(updates_note)

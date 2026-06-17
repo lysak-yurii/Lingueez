@@ -168,7 +168,7 @@ TRANSLATIONS: dict[str, str] = {
     "Bin cleanup grace (days)": "Термін у кошику (дні)",
     "Test Connection": "Перевірити з'єднання",
     "Restart the app after enabling sync for the first time.": "Перезапустіть додаток після першого увімкнення синхронізації.",
-    "Start automatically on login (minimized to tray)": "Запускати автоматично при вході (згорнути у трей)",
+    "Start automatically on login (minimized to tray)": "Запускати автоматично при вході (у згорнутому вигляді)",
     "Add Word hotkey (global)": "Гаряча клавіша «Додати слово» (глобальна)",
     "Data format": "Формат даних",
     "Columns to export": "Стовпці для експорту",
@@ -627,11 +627,6 @@ TRANSLATIONS: dict[str, str] = {
     "Usage": "Використання",
     "OpenAI (ChatGPT)": "OpenAI (ChatGPT)",
     "Google Gemini": "Google Gemini",
-    "Autostart launches the app with the --minimized flag, so it "
-    "begins hidden in the tray.": (
-        "Автозапуск запускає програму з прапором --minimized, тому вона "
-        "починає роботу прихованою у системному лотку."
-    ),
     "Click the field and press the desired key combination — it opens "
     "'Add Word' with the clipboard content from anywhere. "
     "Leave empty to disable.": (
@@ -907,10 +902,10 @@ TRANSLATIONS: dict[str, str] = {
     "Later": "Пізніше",
     "Download": "Завантажити",
     "Check for updates on startup": "Перевіряти оновлення під час запуску",
-    "Checks GitHub for a newer release once a day and notifies you; "
-    "it never downloads or installs anything automatically.":
-        "Раз на день перевіряє GitHub на наявність новішої версії та сповіщає вас; "
-        "нічого не завантажує й не встановлює автоматично.",
+    "Checks once a day for a newer version and lets you know; "
+    "nothing is ever downloaded or installed automatically.":
+        "Раз на день перевіряє наявність новішої версії та сповіщає вас; "
+        "нічого не завантажується й не встановлюється автоматично.",
 
     # Misc units
     "in": "дюйм",

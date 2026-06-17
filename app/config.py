@@ -201,6 +201,9 @@ DEFAULTS = {
     # Updates (notify-only check against GitHub Releases)
     "auto_check_updates": "True",       # check for a newer release on startup
     "skipped_version": "",              # release the user chose to skip
+    # Autostart: enabled once on first run; the flag records that we've applied
+    # the default so a deliberate later opt-out is never silently re-enabled.
+    "autostart_configured": "False",
 }
 
 _lock = threading.Lock()

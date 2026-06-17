@@ -281,6 +281,17 @@ class MainWindow(QMainWindow):
         elif self.sync_enabled:
             self._update_sync_status_ui("error", tr("Sync enabled but not connected. Check settings."))
 
+        # Enable autostart by default on the very first run (once only, so a
+        # later opt-out in Settings sticks), then repair the entry if a prior
+        # build's executable path drifted (e.g. a renamed AppImage on update).
+        self._maybe_enable_autostart_default()
+        if getattr(sys, "frozen", False):
+            try:
+                from app.system.autostart import sync_autostart_path
+                sync_autostart_path()
+            except Exception as exc:
+                logging.warning(f"Autostart path sync failed: {exc}")
+
         # Check GitHub for a newer release (throttled, non-blocking).
         QTimer.singleShot(3000, self._maybe_check_for_updates)
 
@@ -2032,6 +2043,20 @@ class MainWindow(QMainWindow):
         win.show()
 
     # --------------------------------------------------------------- updates
+
+    def _maybe_enable_autostart_default(self):
+        """First-run default: register the app to start on login. Runs once —
+        the `autostart_configured` flag then keeps a later opt-out from being
+        silently undone on the next launch."""
+        if get_bool(self.settings, "autostart_configured", False):
+            return
+        try:
+            from app.system.autostart import set_autostart
+            set_autostart(True)
+        except Exception as exc:
+            logging.warning(f"Could not enable autostart on first run: {exc}")
+        self.settings["autostart_configured"] = "True"
+        save_settings(self.settings)
 
     def _maybe_check_for_updates(self):
         """Startup check: respect the user's preference and the daily throttle."""

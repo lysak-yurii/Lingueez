@@ -56,6 +56,61 @@ def get_autostart_enabled() -> bool:
     return _get_autostart_linux()
 
 
+def sync_autostart_path():
+    """Repair a stale autostart entry whose recorded executable path no longer
+    matches the running one — e.g. after the user updates a Linux AppImage by
+    saving it under a new filename, leaving the old `Exec=` pointing nowhere.
+
+    No-op when autostart is disabled or the path already matches. Rewrites the
+    entry (registry value / .desktop) with the current command otherwise.
+    """
+    if not get_autostart_enabled():
+        return
+    exec_cmd, _ = _get_app_command_and_workdir()
+    expected = f"{exec_cmd} --minimized"
+    try:
+        if _current_autostart_command() != expected:
+            logging.info("Refreshing stale autostart entry to current executable path.")
+            set_autostart(True)
+    except Exception as exc:
+        logging.warning(f"Could not refresh autostart path: {exc}")
+
+
+def _current_autostart_command():
+    """The command string stored in the existing autostart entry, or None."""
+    if sys.platform == 'win32':
+        return _read_autostart_command_windows()
+    return _read_autostart_command_linux()
+
+
+def _read_autostart_command_linux():
+    path = os.path.expanduser(f"~/.config/autostart/{_APP_NAME}.desktop")
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if line.startswith("Exec="):
+                    return line[len("Exec="):].strip()
+    except OSError:
+        pass
+    return None
+
+
+def _read_autostart_command_windows():
+    try:
+        import winreg
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ)
+        try:
+            value, _ = winreg.QueryValueEx(key, _APP_NAME)
+            return value
+        except FileNotFoundError:
+            return None
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        return None
+
+
 def _set_autostart_linux(enabled: bool):
     autostart_dir = os.path.expanduser("~/.config/autostart")
     desktop_file = os.path.join(autostart_dir, f"{_APP_NAME}.desktop")
