@@ -78,7 +78,7 @@ TABLE_DENSITY = {
     "Comfortable": {"scale": 1.2, "row_ratio": 3.3},
     "Spacious":    {"scale": 1.4, "row_ratio": 3.6},
 }
-TABLE_DENSITY_DEFAULT = "Normal"
+TABLE_DENSITY_DEFAULT = "Comfortable"
 
 _current_colors = None
 

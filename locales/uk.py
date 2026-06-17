@@ -144,6 +144,7 @@ TRANSLATIONS: dict[str, str] = {
     "Table size": "Розмір таблиці",
     "Interface language": "Мова інтерфейсу",
     "Restart the app to apply the language change.": "Перезапустіть додаток для зміни мови.",
+    "The interface language has changed. Restart now to apply it?": "Мову інтерфейсу змінено. Перезапустити зараз, щоб застосувати?",
     "TTS provider": "Постачальник TTS",
     "Google Cloud credentials": "Облікові дані Google Cloud",
     "Voice type": "Тип голосу",
