@@ -888,6 +888,10 @@ TRANSLATIONS: dict[str, str] = {
     "created by": "створив",
     "Version": "Версія",
     "Build": "Збірка",
+    "Your personal vocabulary companion": "Ваш персональний словниковий помічник",
+    "Build, study, and remember vocabulary across languages — with cloud sync, AI-assisted definitions, translations, text-to-speech, and flexible export.":
+        "Створюйте, вивчайте та запам'ятовуйте словниковий запас різними мовами — із хмарною синхронізацією, визначеннями за допомогою ШІ, перекладами, озвученням і гнучким експортом.",
+    "Source code": "Вихідний код",
     "Your personal vocabulary companion with cloud sync, AI definitions, translations, text-to-speech and export options.":
         "Ваш персональний помічник для вивчення слів із хмарною синхронізацією, визначеннями від ШІ, перекладами, озвучуванням та експортом.",
     "Licensed under the GNU Affero General Public License v3.0. This attribution must be preserved (AGPL §7).":

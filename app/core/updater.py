@@ -41,6 +41,7 @@ from app.version import APP_VERSION
 
 GITHUB_OWNER = "lysak-yurii"
 GITHUB_REPO = "Lingueez"
+GITHUB_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
 LATEST_URL = (
     f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 )
@@ -118,7 +119,7 @@ def check_for_update(current=APP_VERSION):
 
     return UpdateInfo(
         version=str(tag).strip().lstrip("vV"),
-        url=data.get("html_url") or f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases",
+        url=data.get("html_url") or f"{GITHUB_URL}/releases",
         notes=(data.get("body") or "").strip(),
         published_at=data.get("published_at") or "",
     )

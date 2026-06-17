@@ -2148,22 +2148,70 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def show_about(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QPixmap
+        from app.core.updater import GITHUB_URL
         from app.ui.dialogs.base import FramelessDialog
+
         dialog = FramelessDialog(self, title=f"{tr('About')} {APP_NAME}")
-        dialog.setMinimumWidth(420)
-        repo = "https://github.com/lysak-yurii/Lingueez"
-        body = QLabel(
-            f"<h3>{APP_NAME} — {tr('created by')} Yurii Lysak</h3>"
-            f"<p>{tr('Version')} {APP_VERSION} &nbsp;·&nbsp; {tr('Build')} {BUILD_NUMBER}</p>"
-            f"<p>{tr('Your personal vocabulary companion with cloud sync, AI definitions, translations, text-to-speech and export options.')}</p>"
-            f"<p>{tr('Licensed under the GNU Affero General Public License v3.0. This attribution must be preserved (AGPL §7).')}</p>"
-            f"<p>{tr('Found a bug or have an idea?')} "
-            f"<a href='{repo}/issues'>{tr('Report an issue')}</a>.</p>"
-            f"<p><a href='{repo}'>GitHub</a></p>")
-        body.setWordWrap(True)
-        body.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        body.setOpenExternalLinks(True)
-        dialog.content_layout.addWidget(body)
+        dialog.setMinimumWidth(460)
+
+        # --- Header: logo + name / tagline / version ---
+        header = QHBoxLayout()
+        header.setSpacing(14)
+        logo = QLabel()
+        dpr = dialog.devicePixelRatioF()
+        pm = QPixmap("assets/icons/icon.png").scaled(
+            int(64 * dpr), int(64 * dpr), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pm.setDevicePixelRatio(dpr)
+        logo.setPixmap(pm)
+        logo.setFixedSize(64, 64)
+        header.addWidget(logo, 0, Qt.AlignTop)
+
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
+        name = QLabel(APP_NAME)
+        name_font = name.font()
+        name_font.setPointSize(name_font.pointSize() + 5)
+        name_font.setWeight(QFont.DemiBold)
+        name.setFont(name_font)
+        title_box.addWidget(name)
+        tagline = QLabel(tr("Your personal vocabulary companion"), objectName="dimLabel")
+        title_box.addWidget(tagline)
+        version = QLabel(f"{tr('Version')} {APP_VERSION} · {tr('Build')} {BUILD_NUMBER}",
+                         objectName="dimLabel")
+        title_box.addWidget(version)
+        header.addLayout(title_box, 1)
+        dialog.content_layout.addLayout(header)
+
+        # --- Description ---
+        desc = QLabel(tr("Build, study, and remember vocabulary across languages — with "
+                         "cloud sync, AI-assisted definitions, translations, text-to-speech, "
+                         "and flexible export."))
+        desc.setWordWrap(True)
+        dialog.content_layout.addWidget(desc)
+
+        # --- Legal ---
+        legal = QLabel(
+            "© 2024–2026 Yurii Lysak<br>"
+            + tr("Licensed under the GNU Affero General Public License v3.0. "
+                 "This attribution must be preserved (AGPL §7)."),
+            objectName="dimLabel")
+        legal.setWordWrap(True)
+        dialog.content_layout.addWidget(legal)
+
+        # --- Links: source code / report an issue ---
+        links = QHBoxLayout()
+        for label, url in ((tr("Source code"), GITHUB_URL),
+                           (tr("Report an issue"), f"{GITHUB_URL}/issues")):
+            link = QPushButton(label, objectName="tonalButton")
+            link.setCursor(Qt.PointingHandCursor)
+            link.clicked.connect(lambda _=False, u=url: QDesktopServices.openUrl(QUrl(u)))
+            links.addWidget(link)
+        links.addStretch(1)
+        dialog.content_layout.addLayout(links)
+
+        # --- Actions: check for updates / OK ---
         row = QHBoxLayout()
         check = QPushButton(tr("Check for updates"))
         check.setCursor(Qt.PointingHandCursor)
