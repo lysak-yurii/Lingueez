@@ -19,18 +19,18 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Bin: soft-deleted words/texts stored in the Supabase cloud."""
+"""Bin: deleted words/texts kept in the local trash and (when sync is on) the
+Supabase cloud, so they can be restored within the grace period."""
 import logging
 from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QTabWidget,
+    QHBoxLayout, QHeaderView, QMessageBox, QPushButton, QTabWidget,
     QTableWidget, QTableWidgetItem, QAbstractItemView,
 )
 
 from app.config import get_int, load_settings
-from app.core.supabase_client import SupabaseClient
 from app.i18n import lang_label, tr
 from app.ui.dialogs.base import FramelessDialog
 
@@ -49,22 +49,12 @@ class BinWindow(FramelessDialog):
         super().__init__(parent, title=tr("Bin — Deleted Items"))
         self.db_adapter = db_adapter
         self.on_restored = on_restored
-        self.supabase = SupabaseClient()
 
         self.setMinimumSize(760, 480)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
         layout = self.content_layout
         layout.setContentsMargins(16, 16, 16, 12)
-
-        if not self.supabase.is_connected():
-            note = QLabel(tr("The Bin requires cloud sync (Supabase). Enable and configure it in Settings → APIs → Sync."))
-            note.setWordWrap(True)
-            layout.addWidget(note)
-            close_btn = QPushButton(tr("Close"))
-            close_btn.clicked.connect(self.reject)
-            layout.addWidget(close_btn, alignment=Qt.AlignRight)
-            return
 
         self.tabs = QTabWidget()
         self.words_table = self._make_table([
@@ -110,9 +100,34 @@ class BinWindow(FramelessDialog):
         header.setStretchLastSection(True)
         return table
 
+    def _cloud(self):
+        """The cloud client when sync is active for this session, else None.
+
+        Honors the user's sync setting (via the adapter), so a disabled-sync
+        session never lists/acts on cloud items it cannot manage."""
+        if self.db_adapter._use_cloud():
+            return self.db_adapter.supabase
+        return None
+
+    def _binned(self, table_name):
+        """Union of locally-binned items and (when sync is active) cloud
+        soft-deletes, de-duplicated by ID with the local copy preferred."""
+        items = {}
+        for it in self.db_adapter.get_binned_items(table_name):
+            key = it.get('ID') or it.get('id')
+            if key is not None:
+                items[int(key)] = it
+        cloud = self._cloud()
+        if cloud:
+            for it in cloud.get_all_soft_deleted_items(table_name):
+                key = it.get('ID') or it.get('id')
+                if key is not None and int(key) not in items:
+                    items[int(key)] = it
+        return list(items.values())
+
     def load_data(self):
         try:
-            words = self.supabase.get_all_soft_deleted_items('words')
+            words = self._binned('words')
             self.words_table.setRowCount(0)
             for word in words:
                 row = self.words_table.rowCount()
@@ -123,7 +138,7 @@ class BinWindow(FramelessDialog):
                         lang_label(word.get('Language2', '')), _fmt_date(word.get('deleted_at'))]):
                     self.words_table.setItem(row, col, QTableWidgetItem(str(value)))
 
-            texts = self.supabase.get_all_soft_deleted_items('texts')
+            texts = self._binned('texts')
             self.texts_table.setRowCount(0)
             for text in texts:
                 row = self.texts_table.rowCount()
@@ -134,7 +149,7 @@ class BinWindow(FramelessDialog):
                         _fmt_date(text.get('deleted_at'))]):
                     self.texts_table.setItem(row, col, QTableWidgetItem(str(value)))
         except Exception as exc:
-            logging.error(f"Error loading soft-deleted items: {exc}")
+            logging.error(f"Error loading deleted items: {exc}")
             QMessageBox.critical(self, tr("Error"), tr("Failed to load deleted items:\n{error}").format(error=exc))
 
     def _selected(self):
@@ -187,8 +202,7 @@ class BinWindow(FramelessDialog):
         deleted = failed = 0
         for item_type, record_id, row, table in items:
             try:
-                ok = (self.supabase.hard_delete_word(record_id) if item_type == "words"
-                      else self.supabase.hard_delete_text(record_id))
+                ok = self.db_adapter.delete_binned_item(item_type, record_id)
                 if ok:
                     table.removeRow(row)
                     deleted += 1
@@ -205,30 +219,35 @@ class BinWindow(FramelessDialog):
     def manual_cleanup(self):
         settings = load_settings()
         grace_days = get_int(settings, 'cleanup_grace_period_days', 30)
+        cloud = self._cloud()
         try:
-            words_count = self.supabase.get_old_soft_deletes_count('words', grace_days)
-            texts_count = self.supabase.get_old_soft_deletes_count('texts', grace_days)
+            local_count = self.db_adapter.count_old_binned_items(grace_days)
+            cloud_count = 0
+            if cloud:
+                cloud_count = (cloud.get_old_soft_deletes_count('words', grace_days)
+                               + cloud.get_old_soft_deletes_count('texts', grace_days))
         except Exception as exc:
             QMessageBox.critical(self, tr("Cleanup"), tr("Failed to count old items:\n{error}").format(error=exc))
             return
-        total = words_count + texts_count
+        total = max(local_count, cloud_count)
         if total == 0:
             QMessageBox.information(self, tr("Cleanup"),
                                     tr("No items older than {n} days found.").format(n=grace_days))
             return
         if QMessageBox.question(
                 self, tr("Cleanup"),
-                tr("Permanently delete {total} item(s) deleted more than {days} days ago?\n"
-                   "({words} words, {texts} texts)\n\nThis cannot be undone!").format(
-                       total=total, days=grace_days, words=words_count, texts=texts_count),
+                tr("Permanently delete items deleted more than {days} days ago?\n\n"
+                   "This cannot be undone!").format(days=grace_days),
                 QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
             return
         try:
-            words_deleted = self.supabase.cleanup_old_soft_deletes('words', grace_days)
-            texts_deleted = self.supabase.cleanup_old_soft_deletes('texts', grace_days)
+            removed = self.db_adapter.purge_old_binned_items(grace_days)
+            if cloud:
+                cloud.cleanup_old_soft_deletes('words', grace_days)
+                cloud.cleanup_old_soft_deletes('texts', grace_days)
             QMessageBox.information(
                 self, tr("Cleanup"),
-                tr("Permanently deleted {count} old item(s).").format(count=words_deleted + texts_deleted))
+                tr("Permanently deleted {count} old item(s).").format(count=removed))
             self.load_data()
         except Exception as exc:
             logging.error(f"Cleanup failed: {exc}")

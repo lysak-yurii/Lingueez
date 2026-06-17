@@ -725,10 +725,6 @@ TRANSLATIONS: dict[str, str] = {
     ),
 
     # ── bin_window.py (additions) ──────────────────────────────────────────
-    "The Bin requires cloud sync (Supabase). Enable and configure it in Settings → APIs → Sync.": (
-        "Кошик потребує хмарної синхронізації (Supabase). "
-        "Увімкніть та налаштуйте її в Налаштуваннях → APIs → Синхронізація."
-    ),
     "Restore {count} item(s)?": "Відновити {count} елемент(ів)?",
     "Restored {count} item(s).": "Відновлено {count} елемент(ів).",
     "Select item(s) to restore.": "Виберіть елемент(и) для відновлення.",
@@ -738,10 +734,10 @@ TRANSLATIONS: dict[str, str] = {
     "Permanently deleted {count} item(s).": "Остаточно видалено {count} елемент(ів).",
     "Select item(s) to delete permanently.": "Виберіть елемент(и) для остаточного видалення.",
     "No items older than {n} days found.": "Елементів, старших за {n} днів, не знайдено.",
-    "Permanently delete {total} item(s) deleted more than {days} days ago?\n"
-    "({words} words, {texts} texts)\n\nThis cannot be undone!": (
-        "Остаточно видалити {total} елемент(ів), видалених більш ніж {days} днів тому?\n"
-        "({words} слів, {texts} текстів)\n\nЦю дію не можна скасувати!"
+    "Permanently delete items deleted more than {days} days ago?\n\n"
+    "This cannot be undone!": (
+        "Остаточно видалити елементи, видалені більш ніж {days} днів тому?\n\n"
+        "Цю дію не можна скасувати!"
     ),
     "Permanently deleted {count} old item(s).": "Остаточно видалено {count} старих елементів.",
     "Failed to load deleted items:\n{error}": "Не вдалося завантажити видалені елементи:\n{error}",

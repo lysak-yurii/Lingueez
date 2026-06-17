@@ -129,12 +129,29 @@ def initialize_database(db_path=DB_PATH):
         )
     ''')
 
+    # Local trash ("Bin"). Deleting a word/text hard-deletes its row but first
+    # stashes the full payload (and tags, for words) here, so it can be restored
+    # even without cloud sync. A grace period purges old entries. payload/tags are
+    # JSON; record_id preserves the original row ID for restore.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bin_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            record_id INTEGER NOT NULL,
+            payload TEXT NOT NULL,
+            tags TEXT,
+            deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(table_name, record_id)
+        )
+    ''')
+
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_deletions_table_record ON sync_deletions(table_name, record_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_deletions_synced ON sync_deletions(synced_at)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_queue_synced ON sync_queue(synced_at)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_queue_table_record ON sync_queue(table_name, record_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_review_events_word ON review_events(word_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_review_events_day ON review_events(played_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bin_items_deleted ON bin_items(deleted_at)')
 
     conn.commit()
     conn.close()

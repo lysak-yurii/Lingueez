@@ -106,7 +106,21 @@ class DatabaseAdapter:
                     expires_at DATETIME
                 )
             ''')
-            
+
+            # Create bin_items table (local trash; see db.initialize_database)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS bin_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    table_name TEXT NOT NULL,
+                    record_id INTEGER NOT NULL,
+                    payload TEXT NOT NULL,
+                    tags TEXT,
+                    deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(table_name, record_id)
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_bin_items_deleted ON bin_items(deleted_at)')
+
             # Create indexes
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_deletions_table_record ON sync_deletions(table_name, record_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_sync_deletions_synced ON sync_deletions(synced_at)')
@@ -157,6 +171,130 @@ class DatabaseAdapter:
         finally:
             conn.close()
     
+    # ----------------------------------------------------------------- #
+    # Local trash ("Bin"). Stashes deleted rows so they can be restored
+    # without cloud sync; see app/core/db.py for the schema.
+    # ----------------------------------------------------------------- #
+
+    def _bin_capture(self, table_name: str, record_id: int,
+                     payload: Dict[str, Any], tags: Optional[List[str]] = None):
+        """Stash a deleted row's full payload (and tags) into the local Bin."""
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT OR REPLACE INTO bin_items
+                    (table_name, record_id, payload, tags, deleted_at)
+                VALUES (?, ?, ?, ?, datetime('now'))
+            ''', (table_name, record_id, json.dumps(payload),
+                  json.dumps(tags) if tags else None))
+            conn.commit()
+        except Exception as e:
+            logging.error(f"Error capturing {table_name} {record_id} to bin: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def _bin_get(self, table_name: str, record_id: int) -> Optional[Dict[str, Any]]:
+        """Return the stored Bin entry for a record, or None."""
+        conn = sqlite3.connect(self.local_db)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM bin_items WHERE table_name = ? AND record_id = ?",
+            (table_name, record_id))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def _bin_remove(self, table_name: str, record_id: int):
+        """Drop a Bin entry (after restore or permanent delete)."""
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM bin_items WHERE table_name = ? AND record_id = ?",
+                (table_name, record_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _live_word_conflict(self, payload: Dict[str, Any]) -> bool:
+        """True if a live word already uses this payload's (Word1, Word2)."""
+        word1 = payload.get('Word1', payload.get('word1'))
+        word2 = payload.get('Word2', payload.get('word2'))
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM words WHERE Word1 IS ? AND Word2 IS ? LIMIT 1",
+                       (word1, word2))
+        hit = cursor.fetchone() is not None
+        conn.close()
+        return hit
+
+    def get_binned_items(self, table_name: str) -> List[Dict[str, Any]]:
+        """Return locally-binned rows for the Bin window.
+
+        Each item is the stored payload dict with ``deleted_at`` overlaid from
+        the bin row, matching the shape the Bin UI already expects.
+        """
+        conn = sqlite3.connect(self.local_db)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT record_id, payload, deleted_at FROM bin_items "
+            "WHERE table_name = ? ORDER BY deleted_at DESC", (table_name,))
+        rows = cursor.fetchall()
+        conn.close()
+        items = []
+        for row in rows:
+            try:
+                data = json.loads(row['payload'])
+            except (TypeError, ValueError):
+                continue
+            data['deleted_at'] = row['deleted_at']
+            items.append(data)
+        return items
+
+    def purge_old_binned_items(self, grace_days: int) -> int:
+        """Permanently drop Bin entries deleted more than ``grace_days`` ago."""
+        cutoff = (datetime.now() - timedelta(days=max(0, grace_days))).strftime('%Y-%m-%d %H:%M:%S')
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("DELETE FROM bin_items WHERE deleted_at < ?", (cutoff,))
+            conn.commit()
+            return cursor.rowcount or 0
+        except Exception as e:
+            logging.error(f"Error purging old bin items: {e}")
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()
+
+    def count_old_binned_items(self, grace_days: int) -> int:
+        """Count Bin entries deleted more than ``grace_days`` ago."""
+        cutoff = (datetime.now() - timedelta(days=max(0, grace_days))).strftime('%Y-%m-%d %H:%M:%S')
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM bin_items WHERE deleted_at < ?", (cutoff,))
+        n = cursor.fetchone()[0]
+        conn.close()
+        return int(n or 0)
+
+    def delete_binned_item(self, table_name: str, record_id: int) -> bool:
+        """Permanently delete a binned item: drop the local copy and, when
+        connected, hard-delete the cloud soft-delete too."""
+        self._bin_remove(table_name, record_id)
+        if self._use_cloud():
+            try:
+                if table_name == 'words':
+                    self.supabase.hard_delete_word(record_id)
+                else:
+                    self.supabase.hard_delete_text(record_id)
+            except Exception as e:
+                logging.warning(f"Cloud hard-delete of {table_name} {record_id} failed: {e}")
+        return True
+
     def _get_pending_deletions(self) -> List[Dict[str, Any]]:
         """Get all pending deletions that need to be synced."""
         conn = sqlite3.connect(self.local_db)
@@ -792,10 +930,17 @@ class DatabaseAdapter:
         """
         # Get word data before deleting (needed for cloud_id or content-based lookup in cloud)
         word_data = self._get_word_sqlite(word_id)
-        
+
+        # Stash the row (and its tags) in the local Bin so it can be restored
+        # even without cloud sync.
+        if word_data:
+            tag_names = [t.get('tag_name') for t in self._get_word_tags_sqlite(word_id)
+                         if t.get('tag_name')]
+            self._bin_capture('words', word_id, word_data, tag_names)
+
         # Always delete from local
         local_success = self._delete_word_sqlite(word_id)
-        
+
         if local_success:
             # Track deletion for sync
             self._track_deletion('words', word_id)
@@ -852,9 +997,10 @@ class DatabaseAdapter:
         return local_success
     
     def _delete_word_sqlite(self, word_id: int) -> bool:
-        """Delete a word from SQLite."""
+        """Delete a word from SQLite, including its tag links."""
         conn = sqlite3.connect(self.local_db)
         cursor = conn.cursor()
+        cursor.execute("DELETE FROM word_tags WHERE word_id = ?", (word_id,))
         cursor.execute("DELETE FROM words WHERE ID = ?", (word_id,))
         conn.commit()
         conn.close()
@@ -1035,8 +1181,13 @@ class DatabaseAdapter:
     
     def delete_text(self, text_id: int) -> bool:
         """Delete a text. Deletes from both local and cloud if available."""
+        # Stash the row in the local Bin so it can be restored without cloud sync.
+        text_data = self._get_text_sqlite(text_id)
+        if text_data:
+            self._bin_capture('texts', text_id, text_data)
+
         local_success = self._delete_text_sqlite(text_id)
-        
+
         if local_success:
             # Track deletion for sync
             self._track_deletion('texts', text_id)
@@ -1069,89 +1220,121 @@ class DatabaseAdapter:
         return True
     
     def restore_word(self, word_id: int) -> bool:
-        """Restore a soft-deleted word from cloud and sync to local if needed.
-        
+        """Restore a deleted word.
+
+        Store-first: if the word is in the local Bin, re-insert it (preserved ID
+        + tags) from the stored payload so it works without cloud sync. A live
+        word then propagates to the cloud through the normal sync push. Falls
+        back to the cloud bin for cloud-originated soft-deletes not stored locally.
+
         Args:
             word_id: ID of the word to restore
-        
+
         Returns:
             True if successful, False otherwise
         """
-        if not self._use_cloud():
-            logging.warning("Cannot restore word: cloud not available")
-            return False
-        
         try:
-            # Restore in cloud (unset deleted_at)
+            binned = self._bin_get('words', word_id)
+            if binned:
+                payload = json.loads(binned['payload'])
+                if not self._get_word_sqlite(word_id):
+                    # A live word with the same Word1/Word2 would violate the
+                    # UNIQUE constraint — refuse rather than crash, leaving the
+                    # item in the Bin so the user can resolve the duplicate.
+                    if self._live_word_conflict(payload):
+                        logging.warning(
+                            f"Cannot restore word {word_id}: a word with the same "
+                            f"text already exists")
+                        return False
+                    self._insert_word_sqlite_with_id(payload, word_id)
+                # Re-link tags captured at deletion time.
+                try:
+                    tags = json.loads(binned['tags']) if binned.get('tags') else []
+                except (TypeError, ValueError):
+                    tags = []
+                for tag_name in tags:
+                    tag_id = self._get_or_create_tag_sqlite(tag_name)
+                    if tag_id:
+                        self._add_tag_to_word_sqlite(word_id, tag_id)
+                # Best-effort: clear the cloud soft-delete if the word exists there.
+                if self._use_cloud():
+                    try:
+                        self.supabase.restore_word(word_id)
+                    except Exception as e:
+                        logging.debug(f"Cloud restore of word {word_id} skipped: {e}")
+                self._bin_remove('words', word_id)
+                self._remove_deletion_tracking('words', word_id)
+                logging.info(f"Restored word {word_id} from local bin")
+                return True
+
+            # Not in the local bin — cloud-originated soft-delete.
+            if not self._use_cloud():
+                logging.warning(f"Cannot restore word {word_id}: not in local bin and cloud not available")
+                return False
+
             cloud_success = self.supabase.restore_word(word_id)
             if not cloud_success:
                 logging.error(f"Failed to restore word {word_id} in cloud")
                 return False
-            
-            # Check if word exists locally
-            local_word = self._get_word_sqlite(word_id)
-            if not local_word:
-                # Word doesn't exist locally, fetch from cloud and insert with preserved ID
+            if not self._get_word_sqlite(word_id):
                 cloud_word = self.supabase.get_word(word_id)
                 if cloud_word:
-                    # Insert into local database with preserved ID
                     self._insert_word_sqlite_with_id(cloud_word, word_id)
-                    logging.info(f"Restored word {word_id} and synced to local database")
                 else:
                     logging.warning(f"Word {word_id} restored in cloud but not found when fetching")
-            else:
-                logging.info(f"Word {word_id} restored in cloud, already exists locally")
-            
-            # Remove from sync_deletions if it exists
             self._remove_deletion_tracking('words', word_id)
-            
             return True
         except Exception as e:
             logging.error(f"Error restoring word {word_id}: {e}", exc_info=True)
             return False
-    
+
     def restore_text(self, text_id: int) -> bool:
-        """Restore a soft-deleted text from cloud and sync to local if needed.
-        
+        """Restore a deleted text (store-first, with cloud fallback).
+
+        See :meth:`restore_word` for the strategy.
+
         Args:
             text_id: ID of the text to restore
-        
+
         Returns:
             True if successful, False otherwise
         """
-        if not self._use_cloud():
-            logging.warning("Cannot restore text: cloud not available")
-            return False
-        
         try:
-            # Restore in cloud (unset deleted_at)
+            binned = self._bin_get('texts', text_id)
+            if binned:
+                payload = json.loads(binned['payload'])
+                if not self._get_text_sqlite(text_id):
+                    self._insert_text_sqlite_with_id(payload, text_id)
+                if self._use_cloud():
+                    try:
+                        self.supabase.restore_text(text_id)
+                    except Exception as e:
+                        logging.debug(f"Cloud restore of text {text_id} skipped: {e}")
+                self._bin_remove('texts', text_id)
+                self._remove_deletion_tracking('texts', text_id)
+                logging.info(f"Restored text {text_id} from local bin")
+                return True
+
+            if not self._use_cloud():
+                logging.warning(f"Cannot restore text {text_id}: not in local bin and cloud not available")
+                return False
+
             cloud_success = self.supabase.restore_text(text_id)
             if not cloud_success:
                 logging.error(f"Failed to restore text {text_id} in cloud")
                 return False
-            
-            # Check if text exists locally
-            local_text = self._get_text_sqlite(text_id)
-            if not local_text:
-                # Text doesn't exist locally, fetch from cloud and insert with preserved ID
+            if not self._get_text_sqlite(text_id):
                 cloud_text = self.supabase.get_text(text_id)
                 if cloud_text:
-                    # Insert into local database with preserved ID
                     self._insert_text_sqlite_with_id(cloud_text, text_id)
-                    logging.info(f"Restored text {text_id} and synced to local database")
                 else:
                     logging.warning(f"Text {text_id} restored in cloud but not found when fetching")
-            else:
-                logging.info(f"Text {text_id} restored in cloud, already exists locally")
-            
-            # Remove from sync_deletions if it exists
             self._remove_deletion_tracking('texts', text_id)
-            
             return True
         except Exception as e:
             logging.error(f"Error restoring text {text_id}: {e}", exc_info=True)
             return False
-    
+
     def _remove_deletion_tracking(self, table_name: str, record_id: int):
         """Remove deletion tracking for a restored item."""
         conn = sqlite3.connect(self.local_db)
@@ -1190,16 +1373,17 @@ class DatabaseAdapter:
             created_at = datetime.now(timezone.utc).isoformat()
         edited_at = word_data.get('edited_at')
         
-        cursor.execute('''
-            INSERT INTO words (ID, Language1, Word1, Language2, Word2, Status, Source, 
-                             Definition, Definition2, RowNumber, favorite, created_at, edited_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (word_id, language1, word1, language2, word2, status, source, 
-              definition, definition2, row_number, favorite, created_at, edited_at))
-        
-        conn.commit()
-        conn.close()
-        
+        try:
+            cursor.execute('''
+                INSERT INTO words (ID, Language1, Word1, Language2, Word2, Status, Source,
+                                 Definition, Definition2, RowNumber, favorite, created_at, edited_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (word_id, language1, word1, language2, word2, status, source,
+                  definition, definition2, row_number, favorite, created_at, edited_at))
+            conn.commit()
+        finally:
+            conn.close()
+
         # Return the inserted word
         return self._get_word_sqlite(word_id)
     
@@ -1222,14 +1406,15 @@ class DatabaseAdapter:
             created_at = datetime.now(timezone.utc).isoformat()
         edited_at = text_data.get('edited_at')
 
-        cursor.execute('''
-            INSERT INTO texts (ID, RowNumber, Title, Text, Words, Language, Category, Level, created_at, edited_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (text_id, row_number, title, text, words, language, category, level, created_at, edited_at))
-        
-        conn.commit()
-        conn.close()
-        
+        try:
+            cursor.execute('''
+                INSERT INTO texts (ID, RowNumber, Title, Text, Words, Language, Category, Level, created_at, edited_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (text_id, row_number, title, text, words, language, category, level, created_at, edited_at))
+            conn.commit()
+        finally:
+            conn.close()
+
         return self._get_text_sqlite(text_id)
     
     # Tags operations

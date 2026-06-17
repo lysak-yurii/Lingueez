@@ -298,6 +298,13 @@ class MainWindow(QMainWindow):
         elif self.sync_enabled:
             self._update_sync_status_ui("error", tr("Sync enabled but not connected. Check settings."))
 
+        # Prune expired entries from the local Bin (trash) once per launch.
+        try:
+            self.db_adapter.purge_old_binned_items(
+                get_int(settings, "cleanup_grace_period_days", 30))
+        except Exception as exc:
+            logging.warning(f"Bin purge failed: {exc}")
+
         # Enable autostart by default on the very first run (once only, so a
         # later opt-out in Settings sticks), then repair the entry if a prior
         # build's executable path drifted (e.g. a renamed AppImage on update).
