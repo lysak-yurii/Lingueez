@@ -36,7 +36,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QHeaderView,
     QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QStatusBar,
-    QTableView, QTextEdit, QVBoxLayout, QWidget, QWidgetAction, QCheckBox,
+    QTableView, QVBoxLayout, QWidget, QWidgetAction, QCheckBox,
     QAbstractItemView,
 )
 
@@ -2070,9 +2070,13 @@ class MainWindow(QMainWindow):
         heading.setWordWrap(True)
         dialog.content_layout.addWidget(heading)
         if info.notes:
-            notes = QTextEdit()
-            notes.setReadOnly(True)
-            notes.setPlainText(info.notes)
+            from PySide6.QtWidgets import QTextBrowser
+            notes = QTextBrowser()
+            # GitHub release bodies are Markdown; render them instead of
+            # showing raw "## What's Changed" / "* …" source. QTextBrowser
+            # opens the changelog/PR links externally when clicked.
+            notes.setOpenExternalLinks(True)
+            notes.setMarkdown(info.notes)
             notes.setMaximumHeight(220)
             dialog.content_layout.addWidget(notes)
 
