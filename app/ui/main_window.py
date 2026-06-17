@@ -217,6 +217,7 @@ class MainWindow(QMainWindow):
         self.settings = settings
         self.colors = theme.current_colors()
         self._themed_icons = []  # (target, name, color_key, size) for re-tinting
+        self._pending_update = None  # UpdateInfo once a newer release is known
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(QIcon("assets/icons/icon.png"))
@@ -378,9 +379,58 @@ class MainWindow(QMainWindow):
         self.window_controls.set_colors(self.colors)
         if self.sync_popover is not None:
             self.sync_popover.refresh_theme(self.colors)
+        self._rebuild_app_menu()
+        self._apply_menu_button_icon()
+
+    def _rebuild_app_menu(self):
+        """Swap in a freshly built app menu (theme change / update-state change)."""
         old_menu = self.app_menu
         self.app_menu = self._build_app_menu()
         old_menu.deleteLater()
+
+    def _set_pending_update(self, info):
+        """Record/clear the pending update and refresh the menu + ☰ badge."""
+        self._pending_update = info
+        self._rebuild_app_menu()
+        self._apply_menu_button_icon()
+
+    def _apply_menu_button_icon(self):
+        """The ☰ icon, with a small accent dot when an update is pending."""
+        if getattr(self, "_pending_update", None):
+            self.menu_btn.setIcon(self._badged_icon("menu", "text_dim"))
+        else:
+            self.menu_btn.setIcon(self._icon("menu", "text_dim"))
+
+    def _badged_icon(self, name, color_key, size=20):
+        """A themed icon with a small accent 'notification' dot in the top-right."""
+        from PySide6.QtGui import QColor, QPainter, QPixmap
+        # icons.pixmap() returns a shared, cached pixmap — copy before painting.
+        pm = QPixmap(icons.pixmap(name, self.colors[color_key], size))
+        dpr = pm.devicePixelRatio()
+        d = int(7 * dpr)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(self.colors["accent"]))
+        p.drawEllipse(pm.width() - d, 0, d, d)
+        p.end()
+        return QIcon(pm)
+
+    def _build_update_menu_item(self, menu, info):
+        """A QWidgetAction styled to stand out (accent, semibold) so an available
+        update reads as a call-to-action rather than a regular menu entry."""
+        action = QWidgetAction(menu)
+        button = QPushButton(self._icon("download", "accent"),
+                             tr("Update available — v{version}").format(version=info.version))
+        button.setIconSize(QSize(18, 18))
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet(
+            f"QPushButton {{ text-align: left; padding: 7px 12px; border: none;"
+            f" background: transparent; color: {self.colors['accent']}; font-weight: 600; }}"
+            f"QPushButton:hover {{ background: {self.colors['selection']}; }}")
+        button.clicked.connect(lambda: (menu.close(), self._show_update_dialog(info)))
+        action.setDefaultWidget(button)
+        return action
 
     def _build_app_menu(self):
         """Hamburger menu with file operations and view options."""
@@ -410,6 +460,8 @@ class MainWindow(QMainWindow):
         menu.addAction(self._icon("rows"), tr("Max words…"), self.prompt_row_limit)
         menu.addSeparator()
         menu.addAction(self._icon("list"), tr("View Log"), self.open_log_window)
+        if getattr(self, "_pending_update", None):
+            menu.addAction(self._build_update_menu_item(menu, self._pending_update))
         menu.addAction(tr("About"), self.show_about)
         menu.addAction(self._icon("x"), tr("Quit"), self.quit_app)
         return menu
@@ -428,7 +480,7 @@ class MainWindow(QMainWindow):
         sb.setSpacing(2)
 
         self.menu_btn = QPushButton()
-        self._set_icon(self.menu_btn, "menu", "text_dim")
+        self._apply_menu_button_icon()
         self.menu_btn.setIconSize(QSize(20, 20))
         self.menu_btn.setToolTip(tr("Menu"))
         self.menu_btn.setCursor(Qt.PointingHandCursor)
@@ -2095,10 +2147,13 @@ class MainWindow(QMainWindow):
         if info is None:
             if manual:
                 show_toast(self, tr("Updates"), tr("You're up to date."), "success")
+            self._set_pending_update(None)
             return
         # On the silent startup path, honour a version the user chose to skip.
         if not manual and info.version == self.settings.get("skipped_version", ""):
             return
+        if info.version != self.settings.get("skipped_version", ""):
+            self._set_pending_update(info)
         self._show_update_dialog(info)
 
     def _show_update_dialog(self, info):
@@ -2129,6 +2184,7 @@ class MainWindow(QMainWindow):
         def _skip():
             self.settings["skipped_version"] = info.version
             save_settings(self.settings)
+            self._set_pending_update(None)
             dialog.reject()
 
         skip.clicked.connect(_skip)

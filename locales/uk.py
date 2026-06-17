@@ -904,6 +904,7 @@ TRANSLATIONS: dict[str, str] = {
     "Check for updates": "Перевірити оновлення",
     "You're up to date.": "У вас встановлено останню версію.",
     "Update available": "Доступне оновлення",
+    "Update available — v{version}": "Доступне оновлення — v{version}",
     "Lingueez {version} is available — you have {current}.":
         "Доступна версія Lingueez {version} — у вас {current}.",
     "Skip this version": "Пропустити цю версію",
