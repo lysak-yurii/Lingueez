@@ -3,7 +3,7 @@
 # so `sys.platform` here reflects the OS being built for.
 #
 # Layout: a **onedir** build with `contents_directory='.'`, i.e. the executable
-# and its data (assets/, fonts/, locales/, ffmpeg/) sit side by side — matching
+# and its data (assets/, locales/, ffmpeg/) sit side by side — matching
 # the app's path logic, which chdir's to `dirname(sys.executable)` and reads
 # *and writes* every file relative to it (dictionary.db, settings.cfg, backups/,
 # .env, …). Run the extracted folder from a writable location.
@@ -31,8 +31,7 @@ def collect_dir(folder, includes=None):
 
 
 datas = []
-datas += collect_dir("assets")
-datas += collect_dir("fonts")
+datas += collect_dir("assets")  # includes assets/fonts/
 # Ship the locale modules as real .py files beside the exe (contents_directory
 # is '.'), not only inside the PYZ. main.py adds the bundle dir to sys.path, so
 # importlib resolves locales.* from disk, and i18n._available_locales()'s

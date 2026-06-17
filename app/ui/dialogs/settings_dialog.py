@@ -291,7 +291,7 @@ class SettingsDialog(FramelessDialog):
         font_row = QHBoxLayout()
         self.w_font_name = QComboBox()
         self.w_font_name.addItems(exporters.BUILTIN_FONTS + exporters.list_font_names())
-        current_font = str(self.settings.get("font_name", "Helvetica"))
+        current_font = str(self.settings.get("font_name", exporters.DEFAULT_FONT))
         if self.w_font_name.findText(current_font) < 0:
             self.w_font_name.addItem(current_font)
         self.w_font_name.setCurrentText(current_font)
@@ -638,8 +638,8 @@ class SettingsDialog(FramelessDialog):
         if not path:
             return
         try:
-            os.makedirs("fonts", exist_ok=True)
-            shutil.copy(path, os.path.join("fonts", os.path.basename(path)))
+            os.makedirs(exporters.FONTS_DIR, exist_ok=True)
+            shutil.copy(path, os.path.join(exporters.FONTS_DIR, os.path.basename(path)))
         except Exception as exc:
             QMessageBox.warning(self, tr("Add font…"), tr("Could not copy the font file:\n{error}").format(error=exc))
             return

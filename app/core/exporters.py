@@ -62,18 +62,23 @@ PDF_WIDTH_DEFAULTS = {"ID": 0.5, "RowNumber": 0.5, "Status": 0.8, "Language1": 1
                       "Word1": 1.6, "Language2": 1.0, "Word2": 1.6, "Source": 1.0,
                       "created_at": 1.2, "Definition": 2.5, "Definition2": 2.5}
 BUILTIN_FONTS = ["Helvetica", "Times-Roman", "Courier"]
+# Bundled .ttf fonts live here (relative to the app's working dir, in both dev and
+# frozen builds). The reportlab built-ins above are Latin-only, so the default below
+# is a bundled Cyrillic-capable font — Helvetica mangles Ukrainian PDFs.
+FONTS_DIR = os.path.join('assets', 'fonts')
+DEFAULT_FONT = "NotoSans-Regular"
 
 
-def list_font_names(font_folder='fonts'):
-    """Names (filename sans extension) of every .ttf in fonts/."""
+def list_font_names(font_folder=FONTS_DIR):
+    """Names (filename sans extension) of every .ttf in the fonts folder."""
     if not os.path.isdir(font_folder):
         return []
     return sorted(os.path.splitext(f)[0] for f in os.listdir(font_folder)
                   if f.endswith('.ttf'))
 
 
-def register_fonts(font_folder='fonts'):
-    """Register every .ttf in fonts/ with reportlab; returns their names."""
+def register_fonts(font_folder=FONTS_DIR):
+    """Register every .ttf in the fonts folder with reportlab; returns their names."""
     names = []
     for font_name in list_font_names(font_folder):
         try:
@@ -196,7 +201,7 @@ def export_to_pdf_file(rows, file_path, settings, db_path='dictionary.db'):
     top_margin = get_float(settings, "top_margin", 10)
     bottom_margin = get_float(settings, "bottom_margin", 10)
     page_size = settings.get("page_size", "Letter")
-    font_name = settings.get("font_name", "Helvetica")
+    font_name = settings.get("font_name", DEFAULT_FONT)
     font_size = get_float(settings, "font_size", 10)
     leading = get_float(settings, "leading", 12)
     alignment = settings.get("alignment", "CENTER")
@@ -226,8 +231,9 @@ def export_to_pdf_file(rows, file_path, settings, db_path='dictionary.db'):
 
     available_fonts = set(BUILTIN_FONTS) | set(pdfmetrics.getRegisteredFontNames())
     if font_name not in available_fonts:
-        warnings.append(f"Font '{font_name}' is not available; used Helvetica instead.")
-        font_name = "Helvetica"
+        fallback = DEFAULT_FONT if DEFAULT_FONT in available_fonts else "Helvetica"
+        warnings.append(f"Font '{font_name}' is not available; used {fallback} instead.")
+        font_name = fallback
 
     styles = getSampleStyleSheet()
     custom_style = ParagraphStyle(name='CustomFontStyle', fontName=font_name,

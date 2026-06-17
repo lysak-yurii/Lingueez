@@ -41,7 +41,7 @@ def _setup_paths():
 
     Dev: run from the project directory (unchanged).
 
-    Frozen: read-only resources (assets/, fonts/, ffmpeg/) are bundled with the
+    Frozen: read-only resources (assets/, ffmpeg/) are bundled with the
     executable, but user data (dictionary.db, settings.cfg, backups/, .env, logs)
     must live in a writable per-user directory — the bundle dir can be read-only
     (AppImage) or a temporary extract (one-file builds). So seed the bundled
@@ -69,7 +69,7 @@ def _setup_paths():
     except OSError:
         seeded = ''
     if seeded != BUILD_NUMBER:
-        for name in ('assets', 'fonts', 'ffmpeg'):
+        for name in ('assets', 'ffmpeg'):
             src = os.path.join(bundle, name)
             if os.path.isdir(src):
                 # dirs_exist_ok merges, so user-written files (assets/generated)

@@ -68,7 +68,7 @@ DEFAULTS = {
     "top_margin": "10.0",
     "bottom_margin": "10.0",
     "page_size": "Letter",
-    "font_name": "Helvetica",
+    "font_name": "NotoSans-Regular",
     "font_size": "10.0",
     "leading": "12.0",
     "alignment": "CENTER",
