@@ -35,6 +35,11 @@ DEFAULTS = {
     "appearance_mode": "System",        # System | Light | Dark
     "widget_scaling": "1.0",
     "table_density": "Normal",          # Compact | Normal | Comfortable | Spacious
+    # Interface language. "language_configured" records that we've resolved the
+    # initial language once (via OS detection on first run); afterwards the
+    # user's stored "language" is always respected and detection never re-runs.
+    "language": "en",
+    "language_configured": "False",
     # Audio
     "pause_duration": "0.5",
     "number_of_repeats": "1",

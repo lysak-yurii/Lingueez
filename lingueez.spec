@@ -33,6 +33,13 @@ def collect_dir(folder, includes=None):
 datas = []
 datas += collect_dir("assets")
 datas += collect_dir("fonts")
+# Ship the locale modules as real .py files beside the exe (contents_directory
+# is '.'), not only inside the PYZ. main.py adds the bundle dir to sys.path, so
+# importlib resolves locales.* from disk, and i18n._available_locales()'s
+# os.listdir() can actually see them in the frozen build. Picks up every
+# locales/*.py automatically, so future languages need no spec change.
+datas += [(src, dest) for src, dest in collect_dir("locales")
+          if src.endswith(".py")]
 # Qt's own Ukrainian translation for the standard dialog buttons (OK/Cancel/…),
 # loaded at runtime via QLibraryInfo(TranslationsPath) in main.py.
 datas += collect_data_files("PySide6", includes=["Qt/translations/qtbase_uk.qm"])

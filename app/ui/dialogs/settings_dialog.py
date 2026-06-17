@@ -22,6 +22,7 @@
 """Settings dialog. Persists to settings.cfg (and API keys to .env)."""
 import os
 import shutil
+import sys
 
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (
 
 from app.config import get_bool, get_float, get_int, load_settings, save_settings
 from app.core import exporters, translator
-from app.i18n import tr
+from app.i18n import available_languages, tr
 from app.system.autostart import get_autostart_enabled, set_autostart
 from app.ui.dialogs.base import FramelessDialog
 from app.ui.widgets import ColorButton, ColumnPicker
@@ -220,9 +221,10 @@ class SettingsDialog(FramelessDialog):
         form.addRow(tr("Table size"), self._combo("table_density", list(TABLE_DENSITY.keys()), TABLE_DENSITY_DEFAULT, display=tr))
 
         self.language_combo = QComboBox()
-        self.language_combo.addItem("English", "en")
-        self.language_combo.addItem("Українська", "uk")
+        for code, label in available_languages():
+            self.language_combo.addItem(label, code)
         current_lang = str(self.settings.get("language", "en"))
+        self._initial_language = current_lang
         idx = self.language_combo.findData(current_lang)
         if idx >= 0:
             self.language_combo.setCurrentIndex(idx)
@@ -755,6 +757,8 @@ class SettingsDialog(FramelessDialog):
         updated["ai_provider"] = self.ai_provider_combo.currentData()
         updated["translation_provider"] = self.translation_provider_combo.currentData()
         updated["language"] = self.language_combo.currentData()
+        # An explicit pick is final: never let first-run OS detection override it.
+        updated["language_configured"] = "True"
 
         save_settings(updated)
 
@@ -785,4 +789,28 @@ class SettingsDialog(FramelessDialog):
                                 tr("Google Cloud TTS is selected but {problem}\n\n"
                                    "Audio will fall back to gTTS until this is fixed.").format(problem=problem))
 
+        language_changed = updated["language"] != self._initial_language
         self.accept()
+        if language_changed:
+            self._offer_restart()
+
+    def _offer_restart(self):
+        """The language only fully applies on a fresh start (some UI strings are
+        resolved at import time), so offer to relaunch the app now."""
+        from PySide6.QtCore import QProcess
+        from PySide6.QtWidgets import QApplication
+        reply = QMessageBox.question(
+            self.parent() or self, tr("Interface language"),
+            tr("The interface language has changed. Restart now to apply it?"),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply != QMessageBox.Yes:
+            return
+        # --relaunch tells the new instance to wait for our single-instance lock
+        # to free up instead of bailing out with "already running". For a frozen
+        # build sys.executable is the app itself; in dev it's the interpreter, so
+        # the script path has to be passed along as the first argument.
+        args = [a for a in sys.argv[1:] if a != "--relaunch"] + ["--relaunch"]
+        if not getattr(sys, "frozen", False):
+            args = [sys.argv[0]] + args
+        QProcess.startDetached(sys.executable, args)
+        QApplication.quit()

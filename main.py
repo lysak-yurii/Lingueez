@@ -86,6 +86,46 @@ def _setup_paths():
         sys.path.insert(0, bundle)
 
 
+def _detect_os_language(available):
+    """Pick the UI language to start in based on the OS's preferred languages.
+
+    Walks QLocale's ordered ui-language list (e.g. ['uk-UA', 'uk', 'en-US']),
+    reduces each tag to its base code ('uk') and returns the first that the app
+    ships a locale for. Falls back to 'en' when nothing matches.
+    """
+    from PySide6.QtCore import QLocale
+    codes = set(available)
+    for tag in QLocale.system().uiLanguages():
+        base = tag.replace('-', '_').split('_')[0].lower()
+        if base in codes:
+            return base
+    return "en"
+
+
+def _resolve_startup_language(settings):
+    """Return the language to launch in, running first-run OS detection once.
+
+    If a language has already been resolved (``language_configured``), respect
+    the stored choice. Otherwise detect from the OS, persist both the choice and
+    the flag, and never auto-detect again — so a later manual change always wins.
+    """
+    from app.config import get_bool, save_settings
+    from app.i18n import available_languages
+
+    if get_bool(settings, "language_configured", False):
+        return settings.get("language", "en")
+
+    detected = _detect_os_language([code for code, _label in available_languages()])
+    settings["language"] = detected
+    settings["language_configured"] = "True"
+    try:
+        save_settings(settings)
+    except Exception as exc:
+        logging.error(f"Could not persist detected language: {exc}")
+    logging.info(f"First-run language detection selected '{detected}'.")
+    return detected
+
+
 def _setup_logging():
     logging.basicConfig(
         filename='app.log',
@@ -131,7 +171,11 @@ def main():
     os.makedirs(lock_dir, exist_ok=True)
     lock = QLockFile(os.path.join(lock_dir, f"{APP_ID}.lock"))
     lock.setStaleLockTime(30000)
-    if not lock.tryLock(100):
+    # On a self-restart (e.g. after a language change) the outgoing instance is
+    # still shutting down and holding the lock, so wait for it to free up rather
+    # than refusing to start.
+    lock_wait = 8000 if "--relaunch" in sys.argv else 100
+    if not lock.tryLock(lock_wait):
         QMessageBox.warning(None, APP_NAME, f"{APP_NAME} is already running.")
         return 0
 
@@ -144,7 +188,8 @@ def main():
     settings = load_settings()
     # Must run before importing any UI module: some modules resolve tr() into
     # module-level constants at import time, so the language has to be set first.
-    language = settings.get("language", "en")
+    # On the very first run this also detects the language from the OS.
+    language = _resolve_startup_language(settings)
     set_language(language)
 
     # Standard dialog buttons (Yes/No/OK/Cancel…) are drawn by Qt, not our code,

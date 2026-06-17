@@ -75,6 +75,12 @@ def set_language(lang: str) -> None:
             mod = importlib.import_module(f"locales.{lang}")
             _translations = mod.TRANSLATIONS
         except Exception:
+            # Don't fail silently: a missing/unloadable locale module (e.g. not
+            # bundled into a frozen build) would otherwise revert to English
+            # with no trace. Log it so it shows up in app.log.
+            import logging
+            logging.warning("Could not load locale '%s'; falling back to "
+                            "English.", lang, exc_info=True)
             _translations = {}
     # Date names come from the locale module when present, else English.
     _dates = {
@@ -148,6 +154,30 @@ def _available_locales():
     except OSError:
         pass
     return codes
+
+
+def available_languages():
+    """Selectable UI languages as ordered ``(code, native_label)`` pairs.
+
+    Always starts with ``("en", "English")`` (English has no locale module),
+    followed by every locale that ships a module, labelled with its module's
+    ``LANGUAGE_NAME`` (or the bare code if it doesn't define one). Single source
+    of truth for the Settings combo and first-run OS detection, so adding a new
+    locale needs no change here — just drop in ``locales/<code>.py``.
+    """
+    import importlib
+    langs = [("en", "English")]
+    for code in sorted(_available_locales()):
+        label = code
+        try:
+            mod = importlib.import_module(f"locales.{code}")
+            label = getattr(mod, "LANGUAGE_NAME", code)
+        except Exception:
+            import logging
+            logging.warning("Could not load locale '%s' for the language list.",
+                            code, exc_info=True)
+        langs.append((code, label))
+    return langs
 
 
 def _build_canonical_index():

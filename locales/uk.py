@@ -1,6 +1,9 @@
 # Lingueez — Ukrainian (uk) translations.
 # Keys are English UI strings; values are their Ukrainian equivalents.
 
+# Native name of this language, shown in the interface-language picker.
+LANGUAGE_NAME = "Українська"
+
 TRANSLATIONS: dict[str, str] = {
     # ── Common ─────────────────────────────────────────────────────────────
     "Cancel": "Скасувати",
