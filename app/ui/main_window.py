@@ -72,6 +72,22 @@ DEFAULT_HOTKEY = "Ctrl+Shift+V"
 PAGE_WORDS, PAGE_TEXTS, PAGE_STATS = 0, 1, 2
 
 
+def _tray_icon_path() -> str:
+    """Resolve the tray-icon asset for the current OS.
+
+    Windows gets its own variant (the notification area renders differently from
+    Linux desktop panels); everything else shares tray_icon.png. Falls back to the
+    shared icon if the per-OS file is missing so the tray is never left blank by a
+    packaging slip.
+    """
+    icons_dir = os.path.join("assets", "icons")
+    if sys.platform == "win32":
+        win_icon = os.path.join(icons_dir, "tray_icon_win.png")
+        if os.path.exists(win_icon):
+            return win_icon
+    return os.path.join(icons_dir, "tray_icon.png")
+
+
 def _hotkey_to_pynput(seq):
     """Qt portable shortcut ("Ctrl+Shift+V") -> pynput ("<ctrl>+<shift>+v")."""
     mapped = []
@@ -946,9 +962,10 @@ class MainWindow(QMainWindow):
     def _build_tray(self):
         from PySide6.QtWidgets import QSystemTrayIcon
 
-        # Tray uses a dedicated icon so the top-panel/notification-area glyph can
-        # differ from the launcher and window icons (which stay on icon.png).
-        self.tray = QSystemTrayIcon(QIcon("assets/icons/tray_icon.png"), self)
+        # Tray uses a dedicated, per-OS icon so the top-panel/notification-area
+        # glyph can differ from the launcher and window icons (which stay on
+        # icon.png). See _tray_icon_path() for the Windows/other selection.
+        self.tray = QSystemTrayIcon(QIcon(_tray_icon_path()), self)
         self.tray.setToolTip(APP_NAME)
         menu = QMenu()
         menu.addAction(tr("Show"), self.show_window)
