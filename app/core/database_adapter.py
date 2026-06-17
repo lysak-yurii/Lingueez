@@ -55,6 +55,19 @@ class DatabaseAdapter:
     def _use_cloud(self) -> bool:
         """Check if cloud should be used for this operation."""
         return self.use_cloud and self.cloud_available
+
+    def set_use_cloud(self, enabled: bool):
+        """Enable/disable cloud use at runtime without replacing the adapter
+        (pages and dialogs hold a reference to this instance). When enabling,
+        always refresh the client from the current environment so changed
+        Supabase credentials take effect without an app restart."""
+        self.use_cloud = enabled
+        if enabled:
+            if self.supabase is None:
+                self.supabase = SupabaseClient()
+            else:
+                self.supabase.reconfigure()
+        self.cloud_available = self.supabase.is_connected() if self.supabase else False
     
     def _ensure_sync_tables(self):
         """Ensure sync tracking tables exist in the database."""

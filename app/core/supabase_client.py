@@ -49,7 +49,25 @@ class SupabaseClient:
                 self.client = None
         else:
             logging.warning("Supabase credentials not found in environment variables")
-    
+
+    def reconfigure(self):
+        """Rebuild the client from the current environment (e.g. after the
+        Supabase credentials change in Settings) and clear the connection cache,
+        so an existing instance adopts new creds without an app restart."""
+        self.url = os.getenv('SUPABASE_URL')
+        self.key = os.getenv('SUPABASE_KEY')
+        self.client = None
+        if self.url and self.key:
+            try:
+                self.client = create_client(self.url, self.key)
+                logging.info("Supabase client reconfigured")
+            except Exception as e:
+                logging.error(f"Failed to reconfigure Supabase client: {e}")
+                self.client = None
+        with self._connection_cache['lock']:
+            self._connection_cache['result'] = None
+            self._connection_cache['timestamp'] = 0
+
     def is_connected(self) -> bool:
         """Check if Supabase client is connected and can reach the server.
         

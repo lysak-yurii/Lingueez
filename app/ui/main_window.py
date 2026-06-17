@@ -227,6 +227,9 @@ class MainWindow(QMainWindow):
 
         # --- backend ---
         self.sync_enabled = get_bool(settings, "enable_sync", False)
+        # Optimistic until the first sync result confirms reachability; the Bin
+        # button tracks this so it hides when the cloud is unreachable.
+        self._cloud_connected = self.sync_enabled
         self.db_adapter = DatabaseAdapter(use_cloud=self.sync_enabled)
         self.sync_manager = SyncManager()
 
@@ -519,7 +522,8 @@ class MainWindow(QMainWindow):
         self.nav_stats = nav_button("bar-chart", tr("Statistics"),
                                     lambda: self.switch_page(PAGE_STATS),
                                     checkable=True)
-        nav_button("trash", tr("Bin (deleted items)"), self.open_bin)
+        self.nav_bin = nav_button("trash", tr("Bin (deleted items)"), self.open_bin)
+        self.nav_bin.setVisible(self.sync_enabled)
         sb.addStretch(1)
         nav_button("sliders", tr("Settings"), self.open_settings)
 
@@ -594,16 +598,16 @@ class MainWindow(QMainWindow):
         # global sync button sits with the window controls at the far right
         h.addStretch(1)
 
-        if self.sync_enabled:
-            self.sync_button = QPushButton(objectName="iconButton")
-            self._set_icon(self.sync_button, "cloud", "text_dim")
-            self.sync_button.setIconSize(QSize(19, 19))
-            self.sync_button.setToolTip(tr("Cloud sync: idle"))
-            self.sync_button.setCursor(Qt.PointingHandCursor)
-            self.sync_button.clicked.connect(self.show_sync_info)
-            h.addWidget(self.sync_button, 0, Qt.AlignVCenter)
-        else:
-            self.sync_button = None
+        # Always build the sync button so it can be shown/hidden live when sync
+        # is toggled in Settings; visibility tracks self.sync_enabled.
+        self.sync_button = QPushButton(objectName="iconButton")
+        self._set_icon(self.sync_button, "cloud", "text_dim")
+        self.sync_button.setIconSize(QSize(19, 19))
+        self.sync_button.setToolTip(tr("Cloud sync: idle"))
+        self.sync_button.setCursor(Qt.PointingHandCursor)
+        self.sync_button.clicked.connect(self.show_sync_info)
+        self.sync_button.setVisible(self.sync_enabled)
+        h.addWidget(self.sync_button, 0, Qt.AlignVCenter)
 
         h.addSpacing(8)
         self.window_controls = WindowControls(self, self.colors)
@@ -1973,6 +1977,27 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- sync
 
+    def _reapply_sync(self):
+        """Re-apply sync configuration live (enable_sync and/or changed Supabase
+        credentials) without an app restart: refresh both Supabase clients from
+        the current environment and show/hide the sync button. Bin visibility
+        follows the real connection state, resolved by the sync result in
+        _update_sync_status_ui."""
+        enabled = get_bool(self.settings, "enable_sync", False)
+        self.sync_enabled = enabled
+        self.db_adapter.set_use_cloud(enabled)
+        try:
+            self.sync_manager.supabase.reconfigure()
+        except Exception as exc:
+            logging.warning(f"Sync client reconfigure failed: {exc}")
+        self.sync_button.setVisible(enabled)
+        if enabled:
+            run_in_thread(self._run_startup_sync)
+        else:
+            self._cloud_connected = False
+            self.nav_bin.setVisible(False)
+            self._update_sync_status_ui("idle")
+
     def _run_startup_sync(self):
         try:
             if not self.sync_manager.is_sync_enabled():
@@ -1990,6 +2015,12 @@ class MainWindow(QMainWindow):
 
     def _update_sync_status_ui(self, status, message=""):
         self._sync_running = status == "syncing"
+        # Terminal sync results reflect real cloud reachability; the Bin button
+        # (cloud-dependent) follows it.
+        if status in ("success", "error"):
+            self._cloud_connected = status == "success"
+            if hasattr(self, "nav_bin"):
+                self.nav_bin.setVisible(self.sync_enabled and self._cloud_connected)
         if self.sync_button is None:
             return
         name, color_key = SYNC_ICONS.get(status, SYNC_ICONS["idle"])
@@ -2103,6 +2134,7 @@ class MainWindow(QMainWindow):
             # rather than a ~2s freeze.
             crossfade_during(self, self._apply_appearance)
             self._apply_global_hotkey()
+            self._reapply_sync()
             show_toast(self, tr("Settings"), tr("Settings saved."), "success")
 
     def open_log_window(self):
