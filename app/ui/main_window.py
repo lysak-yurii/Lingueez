@@ -28,16 +28,17 @@ import sys
 import threading
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import QElapsedTimer, QEvent, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (QEasingCurve, QElapsedTimer, QEvent, QPoint,
+                            QPropertyAnimation, QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import (
     QAction, QDesktopServices, QFont, QFontMetrics, QGuiApplication, QIcon,
     QKeySequence, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton, QStatusBar,
-    QTableView, QVBoxLayout, QWidget, QWidgetAction, QCheckBox,
-    QAbstractItemView,
+    QApplication, QComboBox, QFileDialog, QGraphicsOpacityEffect, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton,
+    QStackedLayout, QStatusBar, QTableView, QVBoxLayout, QWidget, QWidgetAction,
+    QCheckBox, QAbstractItemView,
 )
 
 from app.config import get_bool, get_float, get_int, load_settings, save_settings
@@ -384,6 +385,9 @@ class MainWindow(QMainWindow):
         """Re-tint all registered icons after a theme change."""
         for target, name, color_key, size in self._themed_icons:
             target.setIcon(self._icon(name, color_key, size))
+        self._empty_icon.setPixmap(
+            icons.pixmap(self._empty_icon_name, self.colors["accent"], 56))
+        self._style_empty_links()
         self._on_favorites_toggled(self.favorites_btn.isChecked())
         if self.is_reading_active:
             self.read_button.setIcon(self._icon("stop", "danger", 17))
@@ -728,10 +732,10 @@ class MainWindow(QMainWindow):
         wp.setSpacing(0)
         wp.addWidget(filters)
 
-        # ---------- table ----------
+        # ---------- table (swaps with an empty state) ----------
         table_wrap = QWidget()
-        tw = QVBoxLayout(table_wrap)
-        tw.setContentsMargins(16, 0, 16, 8)
+        self.table_stack = QStackedLayout(table_wrap)
+        self.table_stack.setContentsMargins(16, 0, 16, 8)
 
         self.model = WordTableModel(self.colors, self)
         self.table = WordTableView()
@@ -817,7 +821,8 @@ class MainWindow(QMainWindow):
         self._col_fit_elapsed.start()
         QTimer.singleShot(0, self._fit_word_columns)
 
-        tw.addWidget(self.table)
+        self.table_stack.addWidget(self.table)               # index 0
+        self.table_stack.addWidget(self._build_words_empty())  # index 1
         wp.addWidget(table_wrap, 1)
 
         self.texts_page = TextsPage(self.db_adapter, self.colors)
@@ -1332,6 +1337,137 @@ class MainWindow(QMainWindow):
             menu.addAction(wa)
         menu.exec(self.search_scope_btn.mapToGlobal(QPoint(0, self.search_scope_btn.height())))
 
+    # ----------------------------------------------------- words empty state
+    def _build_words_empty(self):
+        """Centered illustration + message + CTAs shown when the table is empty."""
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(24, 24, 24, 24)
+        outer.addStretch(2)
+
+        self._empty_icon_name = "book-open"
+        self._empty_icon = QLabel(alignment=Qt.AlignCenter)
+        self._empty_icon.setPixmap(icons.pixmap(self._empty_icon_name,
+                                                 self.colors["accent"], 56))
+        self._empty_icon_fx = QGraphicsOpacityEffect(self._empty_icon)
+        self._empty_icon.setGraphicsEffect(self._empty_icon_fx)
+        outer.addWidget(self._empty_icon)
+        outer.addSpacing(14)
+
+        self._empty_title = QLabel(objectName="EmptyTitle", alignment=Qt.AlignCenter)
+        outer.addWidget(self._empty_title)
+        outer.addSpacing(4)
+
+        self._empty_sub = QLabel(objectName="dimLabel", alignment=Qt.AlignCenter)
+        self._empty_sub.setWordWrap(True)
+        self._empty_sub.setFixedWidth(380)  # fixed so the wrapped height resolves
+        outer.addWidget(self._empty_sub, 0, Qt.AlignHCenter)
+        outer.addSpacing(18)
+
+        self._empty_add_btn = QPushButton(objectName="primaryButton")
+        self._empty_add_btn.setIcon(icons.icon("plus", "#ffffff", 18))
+        self._empty_add_btn.setIconSize(QSize(18, 18))
+        self._empty_add_btn.setCursor(Qt.PointingHandCursor)
+        self._empty_add_btn.setStyleSheet("padding: 9px 18px; border-radius: 8px;")
+        self._empty_add_btn.clicked.connect(self.open_add_word)
+        outer.addWidget(self._empty_add_btn, 0, Qt.AlignHCenter)
+        outer.addSpacing(12)
+
+        # secondary actions: Import · Take the tour  /  Clear filters
+        links = QHBoxLayout()
+        links.setSpacing(8)
+        links.addStretch(1)
+
+        def link_button(slot):
+            b = QPushButton()
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFlat(True)
+            b.clicked.connect(slot)
+            return b
+
+        self._empty_import_btn = link_button(self.import_excel)
+        self._empty_dot = QLabel("·", objectName="dimLabel")
+        self._empty_tour_btn = link_button(self.start_tour)
+        self._empty_clear_btn = link_button(self._clear_word_filters)
+        self._empty_links = (self._empty_import_btn, self._empty_tour_btn,
+                             self._empty_clear_btn)
+        self._style_empty_links()
+        for w in (self._empty_import_btn, self._empty_dot, self._empty_tour_btn,
+                  self._empty_clear_btn):
+            links.addWidget(w)
+        links.addStretch(1)
+        outer.addLayout(links)
+        outer.addStretch(3)
+
+        # slow "breathing" opacity loop, only while the empty state is visible
+        anim = QPropertyAnimation(self._empty_icon_fx, b"opacity", self)
+        anim.setDuration(2500)
+        anim.setEasingCurve(QEasingCurve.InOutSine)
+        anim.setKeyValueAt(0.0, 1.0)
+        anim.setKeyValueAt(0.5, 0.55)
+        anim.setKeyValueAt(1.0, 1.0)
+        anim.setLoopCount(-1)
+        self._empty_anim = anim
+        return page
+
+    def _update_words_empty(self, shown, total):
+        """Toggle table vs. empty state and pick the right message/actions."""
+        if shown > 0:
+            self.filter_row.setVisible(True)
+            self.table_stack.setCurrentIndex(0)
+            self._empty_anim.pause()
+            return
+        first_run = total == 0
+        # hide the tag/Favorites chips above the first-run empty state; keep them
+        # when a filter merely matches nothing so the user can adjust it
+        self.filter_row.setVisible(not first_run)
+        self._empty_icon_name = "book-open" if first_run else "search"
+        self._empty_icon.setPixmap(icons.pixmap(self._empty_icon_name,
+                                                 self.colors["accent"], 56))
+        if first_run:
+            self._empty_title.setText(tr("Your vocabulary journey starts here"))
+            self._empty_sub.setText(
+                tr("Add your first word — its translation can be fetched automatically."))
+            self._empty_add_btn.setText(tr("Add your first word"))
+            self._empty_import_btn.setText(tr("Import from Excel"))
+            self._empty_tour_btn.setText(tr("Take the tour"))
+        else:
+            self._empty_title.setText(tr("No matching words"))
+            self._empty_sub.setText(tr("Try a different search or filter."))
+            self._empty_clear_btn.setText(tr("Clear filters"))
+        # pin the wrapped subtitle to its true height (centering skips heightForWidth)
+        self._empty_sub.setFixedHeight(self._empty_sub.heightForWidth(380))
+        for w in (self._empty_add_btn, self._empty_import_btn, self._empty_dot,
+                  self._empty_tour_btn):
+            w.setVisible(first_run)
+        self._empty_clear_btn.setVisible(not first_run)
+
+        self.table_stack.setCurrentIndex(1)
+        self._empty_anim.start()
+
+    def _style_empty_links(self):
+        css = (f"QPushButton {{ color: {self.colors['text_dim']}; border: none;"
+               f" background: transparent; padding: 2px 4px; }}"
+               f"QPushButton:hover {{ color: {self.colors['accent']}; }}")
+        for b in self._empty_links:
+            b.setStyleSheet(css)
+
+    def _clear_word_filters(self):
+        """Reset search + filters, then refresh once."""
+        widgets = [self.search_box, self.status_combo, self.lang1_combo,
+                   self.lang2_combo, self.tag_combo, self.favorites_btn]
+        for w in widgets:
+            w.blockSignals(True)
+        self.search_box.clear()
+        for combo in (self.status_combo, self.lang1_combo, self.lang2_combo,
+                      self.tag_combo):
+            combo.setCurrentIndex(0)
+        self.favorites_btn.setChecked(False)
+        for w in widgets:
+            w.blockSignals(False)
+        self._on_favorites_toggled(False)
+        self.refresh_display()
+
     def refresh_display(self):
         if self.df is None:
             return
@@ -1345,6 +1481,7 @@ class MainWindow(QMainWindow):
 
         filtered = wf.apply(self.df)
         self.model.set_dataframe(filtered)
+        self._update_words_empty(len(filtered), len(self.df))
 
         # Fit the meta columns to content once, after the first rows arrive;
         # done here (not at construction) because resizeColumnToContents needs

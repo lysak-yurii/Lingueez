@@ -1124,6 +1124,15 @@ TRANSLATIONS: dict[str, str] = {
         "неподалік вуличний музикант почав грати, і тихі ноти супроводжували її "
         "думки. Це був спокійний і щасливий ранок, який вона любила найбільше.",
     "Demo": "Демо",
+    # --- Words empty state ---
+    "Your vocabulary journey starts here": "Ваша словникова подорож починається тут",
+    "Add your first word — its translation can be fetched automatically.":
+        "Додайте перше слово — отримайте автоматичний переклад.",
+    "Add your first word": "Додати перше слово",
+    "Take the tour": "Переглянути тур",
+    "No matching words": "Немає відповідних слів",
+    "Try a different search or filter.": "Спробуйте інший пошук або фільтр.",
+    "Clear filters": "Очистити фільтри",
     # demo text-list stub titles
     "My first story": "Моя перша історія",
     "A news article": "Новинна стаття",
