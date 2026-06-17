@@ -1124,6 +1124,29 @@ TRANSLATIONS: dict[str, str] = {
         "неподалік вуличний музикант почав грати, і тихі ноти супроводжували її "
         "думки. Це був спокійний і щасливий ранок, який вона любила найбільше.",
     "Demo": "Демо",
+    # --- AI provider error messages ---
+    "Invalid OpenAI API key. Check it in Settings → APIs → AI → OpenAI.":
+        "Недійсний ключ OpenAI API. Перевірте його в Налаштування → API → ШІ → OpenAI.",
+    "Your OpenAI account is out of credits. Add credits at "
+    "platform.openai.com/account/billing, or switch the AI "
+    "provider to Gemini in Settings → APIs → AI.":
+        "На вашому акаунті OpenAI закінчилися кошти. Поповніть на "
+        "platform.openai.com/account/billing або змініть постачальника ШІ "
+        "на Gemini в Налаштування → API → ШІ.",
+    "OpenAI rate limit reached. Wait a moment and try again.":
+        "Перевищено ліміт запитів OpenAI. Зачекайте трохи й спробуйте ще раз.",
+    "Unknown OpenAI model. Check the model name in Settings → APIs → AI → OpenAI.":
+        "Невідома модель OpenAI. Перевірте назву моделі в Налаштування → API → ШІ → OpenAI.",
+    "Could not reach OpenAI. Check your internet connection.":
+        "Не вдалося з'єднатися з OpenAI. Перевірте підключення до Інтернету.",
+    "Gemini quota exhausted. The free tier resets daily; wait, "
+    "or create a new key at aistudio.google.com/app/apikey.":
+        "Квоту Gemini вичерпано. Безкоштовний рівень оновлюється щодня; зачекайте "
+        "або створіть новий ключ на aistudio.google.com/app/apikey.",
+    "Invalid Google API key. Check it in Settings → APIs → AI → Gemini.":
+        "Недійсний ключ Google API. Перевірте його в Налаштування → API → ШІ → Gemini.",
+    "Unknown Gemini model. Check the model name in Settings → APIs → AI → Gemini.":
+        "Невідома модель Gemini. Перевірте назву моделі в Налаштування → API → ШІ → Gemini.",
     # --- Words empty state ---
     "Your vocabulary journey starts here": "Ваша словникова подорож починається тут",
     "Add your first word — its translation can be fetched automatically.":

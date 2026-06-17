@@ -38,6 +38,7 @@ from dotenv import load_dotenv
 from app.config import load_settings, get_float, get_int
 from app.core.backup_management import backup_database
 from app.core.database_adapter import DatabaseAdapter
+from app.i18n import tr
 
 DEFAULT_PROVIDER = "openai"
 
@@ -136,19 +137,19 @@ class _OpenAIProvider(_Provider):
     def _friendly_error(self, exc):
         import openai
         if isinstance(exc, openai.AuthenticationError):
-            return ("Invalid OpenAI API key. "
-                    "Check it in Settings → APIs → AI → OpenAI.")
+            return tr("Invalid OpenAI API key. "
+                      "Check it in Settings → APIs → AI → OpenAI.")
         if isinstance(exc, openai.RateLimitError):
             if "insufficient_quota" in str(exc):
-                return ("Your OpenAI account is out of credits. Add credits at "
-                        "platform.openai.com/account/billing, or switch the AI "
-                        "provider to Gemini in Settings → APIs → AI.")
-            return "OpenAI rate limit reached. Wait a moment and try again."
+                return tr("Your OpenAI account is out of credits. Add credits at "
+                          "platform.openai.com/account/billing, or switch the AI "
+                          "provider to Gemini in Settings → APIs → AI.")
+            return tr("OpenAI rate limit reached. Wait a moment and try again.")
         if isinstance(exc, openai.NotFoundError):
-            return ("Unknown OpenAI model. "
-                    "Check the model name in Settings → APIs → AI → OpenAI.")
+            return tr("Unknown OpenAI model. "
+                      "Check the model name in Settings → APIs → AI → OpenAI.")
         if isinstance(exc, openai.APIConnectionError):
-            return "Could not reach OpenAI. Check your internet connection."
+            return tr("Could not reach OpenAI. Check your internet connection.")
         return f"OpenAI error: {exc}"
 
 
@@ -185,14 +186,14 @@ class _GeminiProvider(_Provider):
         from google.genai import errors
         if isinstance(exc, errors.APIError):
             if exc.code == 429:
-                return ("Gemini quota exhausted. The free tier resets daily; wait, "
-                        "or create a new key at aistudio.google.com/app/apikey.")
+                return tr("Gemini quota exhausted. The free tier resets daily; wait, "
+                          "or create a new key at aistudio.google.com/app/apikey.")
             if exc.code in (401, 403):
-                return ("Invalid Google API key. "
-                        "Check it in Settings → APIs → AI → Gemini.")
+                return tr("Invalid Google API key. "
+                          "Check it in Settings → APIs → AI → Gemini.")
             if exc.code == 404:
-                return ("Unknown Gemini model. "
-                        "Check the model name in Settings → APIs → AI → Gemini.")
+                return tr("Unknown Gemini model. "
+                          "Check the model name in Settings → APIs → AI → Gemini.")
             return f"Gemini error {exc.code}: {exc.message}"
         return f"Gemini error: {exc}"
 
