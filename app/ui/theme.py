@@ -250,6 +250,11 @@ QPushButton#iconButton {{
 QPushButton#iconButton:hover {{ background: {c['surface_alt']}; }}
 QPushButton#iconButton:checked {{ background: {c['selection']}; }}
 QPushButton#iconButton::menu-indicator {{ image: none; width: 0px; }}
+QFrame#FilterPopover {{
+    background: {c['surface']};
+    border: 1px solid {c['border']};
+    border-radius: 10px;
+}}
 QPushButton#chipButton {{
     border-radius: 14px;
     padding: 5px 14px;
@@ -258,6 +263,10 @@ QPushButton#chipButton:checked {{
     background: {c['accent']};
     color: white;
     border-color: {c['accent']};
+}}
+QPushButton#chipButton[active="true"] {{
+    background: {c['selection']};
+    color: {c['accent']};
 }}
 
 /* ---------- table ---------- */

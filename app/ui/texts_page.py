@@ -39,7 +39,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame,
     QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
-    QStackedLayout, QStyle, QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
+    QGridLayout, QStackedLayout, QStyle, QStyledItemDelegate, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 from app.config import get_float, get_int, load_settings, save_settings
@@ -285,29 +286,35 @@ class TextsPage(QWidget):
         toolbar.addStretch(1)
         ll.addLayout(toolbar)
 
-        # Filters live in a flow layout so they reflow onto extra rows when the
-        # panel is narrow, instead of clipping (e.g. a long localized "Newest
-        # first" squeezing the language filter down to its arrow). ContentComboBox
-        # keeps each one sized to its current text, not its widest option.
-        self.lang_filter = ContentComboBox()
+        # Filters in a 2-column grid: they stay two-per-row and shrink (the
+        # dropdowns truncate) as the panel narrows, instead of stacking into four
+        # full-width rows. Equal column stretch keeps the pairs balanced.
+        # min_chars=2: lets the grid cells shrink small (truncating) so they stay
+        # two-per-row in a narrow panel instead of stacking.
+        self.lang_filter = ContentComboBox(min_chars=1)
         self.lang_filter.addItem(ALL_LANGUAGES)
         self.lang_filter.currentTextChanged.connect(self._refresh_list)
-        self.sort_combo = ContentComboBox()
+        self.sort_combo = ContentComboBox(min_chars=1)
         self.sort_combo.addItems([SORT_NEWEST, SORT_OLDEST, SORT_TITLE])
         self.sort_combo.currentTextChanged.connect(self._refresh_list)
-        self.level_filter = ContentComboBox()
+        self.level_filter = ContentComboBox(min_chars=1)
         self.level_filter.addItem(ALL_LEVELS)
         self.level_filter.currentTextChanged.connect(self._refresh_list)
-        self.topic_filter = ContentComboBox()
+        self.topic_filter = ContentComboBox(min_chars=1)
         self.topic_filter.addItem(ALL_TOPICS)
         self.topic_filter.currentTextChanged.connect(self._refresh_list)
 
-        filters_host = QWidget()
-        filters_flow = FlowLayout(filters_host, hspacing=8, vspacing=8)
-        for combo in (self.lang_filter, self.sort_combo,
-                      self.level_filter, self.topic_filter):
-            filters_flow.addWidget(combo)
-        ll.addWidget(filters_host)
+        filters_grid = QGridLayout()
+        filters_grid.setContentsMargins(0, 0, 0, 0)
+        filters_grid.setHorizontalSpacing(8)
+        filters_grid.setVerticalSpacing(8)
+        filters_grid.setColumnStretch(0, 1)
+        filters_grid.setColumnStretch(1, 1)
+        filters_grid.addWidget(self.lang_filter, 0, 0)
+        filters_grid.addWidget(self.sort_combo, 0, 1)
+        filters_grid.addWidget(self.level_filter, 1, 0)
+        filters_grid.addWidget(self.topic_filter, 1, 1)
+        ll.addLayout(filters_grid)
 
         self.listing = QListWidget(objectName="TextsList")
         self.listing.setMouseTracking(True)
@@ -349,9 +356,10 @@ class TextsPage(QWidget):
         self.title_edit = QLineEdit(objectName="ReaderTitle")
         self.title_edit.setPlaceholderText(tr("Title"))
         # Elide rather than hold a width, so the header can be squeezed — but
-        # keep a floor so the title never collapses to nothing.
+        # keep a floor generous enough to show a typical title (the reader
+        # toolbar collapses to "⋯" to give it this room).
         self.title_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self.title_edit.setMinimumWidth(80)
+        self.title_edit.setMinimumWidth(140)
         self.title_edit.textEdited.connect(self._mark_dirty)
         top.addWidget(self.title_edit, 1)
 

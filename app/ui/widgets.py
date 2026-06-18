@@ -20,16 +20,135 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Small reusable widgets."""
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import (
+    QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, QSize, Qt, QTimer,
+    Signal,
+)
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QGridLayout, QHBoxLayout, QLabel, QLayout,
-    QMenu, QPushButton, QSizePolicy, QStyle, QStyleOptionComboBox, QToolButton,
-    QWidget,
+    QLineEdit, QMenu, QPushButton, QSizePolicy, QStyle, QStyleOptionComboBox,
+    QToolButton, QWidget,
 )
 
 from app.i18n import tr
 from app.ui import icons
+
+
+class SearchField(QWidget):
+    """Search input that, in compact mode, collapses to a round icon button and
+    expands rightward into a full field (animated) when clicked — the pattern
+    used by many desktop apps. In normal mode it is just a full-width box.
+
+    `expandedChanged(bool)` fires when it opens/closes while compact, so the host
+    can free room (e.g. hide the window title) during search.
+    """
+
+    COLLAPSED_W = 36
+    OPEN_MIN = 150  # keep the open field wide enough to read what you type
+    expandedChanged = Signal(bool)
+
+    def __init__(self, colors, placeholder="", parent=None):
+        super().__init__(parent)
+        self._colors = colors
+        self._compact = False
+        self._expanded = True
+        self._max_expanded = 560
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+
+        self.line_edit = QLineEdit(objectName="SearchBox")
+        self.line_edit.setPlaceholderText(placeholder)
+        self.line_edit.setClearButtonEnabled(True)
+        self._icon_action = self.line_edit.addAction(
+            icons.icon("search", colors["text_dim"], 16), QLineEdit.LeadingPosition)
+        self.line_edit.installEventFilter(self)
+        row.addWidget(self.line_edit)
+
+        self.icon_btn = QPushButton(objectName="iconButton")
+        self.icon_btn.setIcon(icons.icon("search", colors["text_dim"], 18))
+        self.icon_btn.setIconSize(QSize(18, 18))
+        self.icon_btn.setCursor(Qt.PointingHandCursor)
+        self.icon_btn.setToolTip(placeholder)
+        self.icon_btn.clicked.connect(self._open)
+        self.icon_btn.hide()
+        row.addWidget(self.icon_btn)
+
+        self._anim = QPropertyAnimation(self, b"maximumWidth", self)
+        self._anim.setDuration(200)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    # --- public API -------------------------------------------------------
+    def set_max_expanded(self, width):
+        self._max_expanded = width
+        if self._expanded and not self._compact:
+            self.setMaximumWidth(width)
+
+    def set_compact(self, compact):
+        if compact == self._compact:
+            return
+        self._compact = compact
+        self._sync(animate=False)
+
+    def is_open(self):
+        """True when the full field (not the icon) is showing while compact."""
+        return self._compact and self._expanded
+
+    # --- state ------------------------------------------------------------
+    def _want_expanded(self):
+        if not self._compact:
+            return True
+        return self.line_edit.hasFocus() or bool(self.line_edit.text())
+
+    def _open(self):
+        self._set_expanded(True, animate=True)
+        self.line_edit.setFocus()
+
+    def _sync(self, animate):
+        self._set_expanded(self._want_expanded(), animate=animate)
+
+    def _set_expanded(self, expanded, animate):
+        was = self._expanded
+        self._expanded = expanded
+        if expanded:
+            self.icon_btn.hide()
+            self.line_edit.show()
+            target = self._max_expanded
+        else:
+            self.line_edit.hide()
+            self.icon_btn.show()
+            target = self.COLLAPSED_W
+        self._animate(target, animate)
+        self.updateGeometry()  # minimum changes between collapsed and open
+        if self._compact and expanded != was:
+            self.expandedChanged.emit(expanded)
+
+    def _animate(self, target, animate):
+        self._anim.stop()
+        if animate and self.isVisible():
+            self._anim.setStartValue(self.maximumWidth())
+            self._anim.setEndValue(target)
+            self._anim.start()
+        else:
+            self.setMaximumWidth(target)
+
+    def minimumSizeHint(self):
+        if self._compact:  # icon-sized when idle, readable once opened
+            w = self.OPEN_MIN if self._expanded else self.COLLAPSED_W
+            return QSize(w, super().minimumSizeHint().height())
+        return super().minimumSizeHint()
+
+    def eventFilter(self, obj, ev):
+        if obj is self.line_edit and ev.type() == QEvent.FocusOut:
+            QTimer.singleShot(0, lambda: self._sync(animate=True))
+        return False
+
+    def refresh_theme(self, colors):
+        self._colors = colors
+        self._icon_action.setIcon(icons.icon("search", colors["text_dim"], 16))
+        self.icon_btn.setIcon(icons.icon("search", colors["text_dim"], 18))
 
 
 class ContentComboBox(QComboBox):
@@ -40,8 +159,9 @@ class ContentComboBox(QComboBox):
     FlowLayout truncate or wrap it when space is tight.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, min_chars=4):
         super().__init__(parent)
+        self._min_chars = min_chars  # how small it may shrink before truncating
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.currentTextChanged.connect(self.updateGeometry)
 
@@ -57,7 +177,7 @@ class ContentComboBox(QComboBox):
         return self._size_for(self.currentText())
 
     def minimumSizeHint(self):
-        return self._size_for("oooo")  # ~4 chars: a small, truncatable floor
+        return self._size_for("o" * self._min_chars)  # small, truncatable floor
 
     def showPopup(self):
         # Widen the list to its longest entry so full names stay readable.
@@ -239,11 +359,12 @@ class OverflowToolBar(QWidget):
         return QSize(w, self._row.sizeHint().height())
 
     def minimumSizeHint(self):
-        # Just the widest single button + the overflow control: usable, yet
-        # small enough never to widen the window.
-        btn_w = max((it["btn"].sizeHint().width() for it in self._items), default=0)
-        ow = self._overflow.sizeHint().width() + self._row.spacing()
-        return QSize(btn_w + ow, self._row.sizeHint().height())
+        # Collapse all the way down to just the "⋯" control, so a neighbouring
+        # widget (e.g. the reader title) can claim the rest when space is tight.
+        if not self._items:
+            return QSize(0, self._row.sizeHint().height())
+        ow = self._overflow.sizeHint().width()
+        return QSize(ow, self._row.sizeHint().height())
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

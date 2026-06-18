@@ -36,10 +36,10 @@ from PySide6.QtGui import (
     QKeySequence, QShortcut,
 )
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QGraphicsOpacityEffect, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox, QPushButton,
-    QStackedLayout, QStatusBar, QTableView, QVBoxLayout, QWidget, QWidgetAction,
-    QCheckBox, QAbstractItemView,
+    QApplication, QComboBox, QFileDialog, QFrame, QGraphicsOpacityEffect,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
+    QPushButton, QStackedLayout, QStatusBar, QTableView, QVBoxLayout, QWidget,
+    QWidgetAction, QCheckBox, QAbstractItemView,
 )
 
 from app.config import get_bool, get_float, get_int, load_settings, save_settings
@@ -61,8 +61,9 @@ from app.ui.player import PlaybackSettingsPopup, PlayerBar, WordPlayer
 from app.ui.texts_page import TextsPage
 from app.ui.stats_page import StatsPage
 from app.ui.toast import show_toast
+from app.ui.widgets import ElidedLabel, SearchField
 from app.ui.word_model import (
-    COL_ID, COL_CREATED, COL_LANG1, COL_LANG2, COL_SOURCE, COL_STATUS,
+    COL_ID, COL_CREATED, COL_LANG1, COL_LANG2, COL_ROWNUM, COL_SOURCE, COL_STATUS,
     COL_WORD1, COL_WORD2, HEADERS, WordFilter, WordTableModel, words_to_dataframe,
 )
 from app.ui.workers import run_in_thread
@@ -243,6 +244,13 @@ class MainWindow(QMainWindow):
         self._playing_records = []
         self.show_source = False
         self.show_created = False
+        # Responsive header, collapsed in stages as the window narrows: first the
+        # search shrinks to an icon (it expands on click), then the words-only
+        # Add/Search-scope buttons fold into a "⋯". Keeps the Words header no
+        # wider than the Texts header and lets the window shrink further.
+        self._header_compact = False     # search collapsed to its icon
+        self._buttons_collapsed = False  # Add/Search-scope folded into "⋯"
+        self._header_metrics = None      # cached widths of the header controls
         self._quitting = False
         self._open_dialogs = {}
         self._tts_fallback_warned = False
@@ -401,6 +409,8 @@ class MainWindow(QMainWindow):
             self.sync_popover.refresh_theme(self.colors)
         self._rebuild_app_menu()
         self._apply_menu_button_icon()
+        self._update_more_filters_active()  # keep the Filters chip tint in sync
+        self.search_field.refresh_theme(self.colors)
 
     def _rebuild_app_menu(self):
         """Swap in a freshly built app menu (theme change / update-state change)."""
@@ -466,15 +476,13 @@ class MainWindow(QMainWindow):
         export_menu.addAction(tr("Audio (MP3)…"), self.save_audio_action)
         menu.addAction(self._icon("archive"), tr("Backups…"), self.open_backups)
         menu.addSeparator()
-        # carry the checked states over when the menu is rebuilt (theme change)
-        show_source = getattr(self, "action_show_source", None)
-        show_created = getattr(self, "action_show_created", None)
+        # reflect user intent (the column may be responsively hidden regardless)
         self.action_show_source = QAction(tr("Show Source column"), self, checkable=True)
-        self.action_show_source.setChecked(show_source.isChecked() if show_source else False)
+        self.action_show_source.setChecked(self.show_source)
         self.action_show_source.toggled.connect(self.toggle_source_column)
         menu.addAction(self.action_show_source)
         self.action_show_created = QAction(tr("Show Created At column"), self, checkable=True)
-        self.action_show_created.setChecked(show_created.isChecked() if show_created else False)
+        self.action_show_created.setChecked(self.show_created)
         self.action_show_created.toggled.connect(self.toggle_created_column)
         menu.addAction(self.action_show_created)
         menu.addAction(self._icon("rows"), tr("Max words…"), self.prompt_row_limit)
@@ -550,18 +558,26 @@ class MainWindow(QMainWindow):
         from app.ui.titlebar import DragArea, FramelessResizer, WindowControls
 
         header = DragArea(objectName="TopBar")
+        self._topbar = header
         h = QHBoxLayout(header)
         h.setContentsMargins(16, 8, 6, 8)
         h.setSpacing(10)
 
-        title_box = QVBoxLayout()
+        self._title_widget = QWidget()
+        title_box = QVBoxLayout(self._title_widget)
+        title_box.setContentsMargins(0, 0, 0, 0)
         title_box.setSpacing(0)
-        title = QLabel(APP_NAME, objectName="AppTitle")
+        title = QLabel(APP_NAME, objectName="AppTitle")  # short; never truncates
         title_box.addWidget(title)
 
         subtitle_row = QHBoxLayout()
         subtitle_row.setSpacing(6)
-        self.source_label = QLabel(tr("Vocabulary"), objectName="SubTitle")
+        # Takes its natural width (shows "Vocabulary" in full); only a very long
+        # file name elides, capped so it never widens the header much.
+        self.source_label = ElidedLabel(min_width=40)
+        self.source_label.setObjectName("SubTitle")
+        self.source_label.setMaximumWidth(240)
+        self.source_label.set_full_text(tr("Vocabulary"))
         subtitle_row.addWidget(self.source_label)
         self.close_file_btn = QPushButton(objectName="iconButton")
         self._set_icon(self.close_file_btn, "x", "text_dim", 14)
@@ -574,20 +590,18 @@ class MainWindow(QMainWindow):
         subtitle_row.addWidget(self.close_file_btn)
         subtitle_row.addStretch(1)
         title_box.addLayout(subtitle_row)
-        h.addLayout(title_box)
+        h.addWidget(self._title_widget)
 
         h.addStretch(1)
 
-        self.search_box = QLineEdit(objectName="SearchBox")
-        self.search_box.setPlaceholderText(tr("Search words, translations or tags…"))
-        self.search_box.setClearButtonEnabled(True)
-        self.search_box.setMinimumWidth(320)
-        self.search_box.setMaximumWidth(560)
+        # Collapses to a search-icon button when the header is narrow, expanding
+        # on click; keeps `search_box` (the inner line edit) for existing logic.
+        self.search_field = SearchField(
+            self.colors, tr("Search words, translations or tags…"))
+        self.search_box = self.search_field.line_edit
         self.search_box.textChanged.connect(self.on_search_changed)
-        search_icon_action = self.search_box.addAction(
-            self._icon("search", "text_dim", 16), QLineEdit.LeadingPosition)
-        self._themed_icons.append((search_icon_action, "search", "text_dim", 16))
-        h.addWidget(self.search_box, 2, Qt.AlignVCenter)
+        self.search_field.expandedChanged.connect(self._on_search_expanded)
+        h.addWidget(self.search_field, 2, Qt.AlignVCenter)
 
         self.search_scope_btn = QPushButton(objectName="iconButton")
         self._set_icon(self.search_scope_btn, "filter", "text_dim")
@@ -604,6 +618,22 @@ class MainWindow(QMainWindow):
         self.add_button.setCursor(Qt.PointingHandCursor)
         self.add_button.clicked.connect(self.open_add_word)
         h.addWidget(self.add_button, 0, Qt.AlignVCenter)
+
+        # Overflow for the two words-only buttons above: shown only when the
+        # header is too narrow to fit them (see _apply_responsive_header).
+        self.header_overflow_btn = QPushButton(objectName="iconButton")
+        self._set_icon(self.header_overflow_btn, "more", "text_dim")
+        self.header_overflow_btn.setIconSize(QSize(18, 18))
+        self.header_overflow_btn.setToolTip(tr("More actions"))
+        self.header_overflow_btn.setCursor(Qt.PointingHandCursor)
+        self._header_overflow_menu = QMenu(self)
+        self._header_overflow_menu.addAction(
+            self._icon("plus"), tr("Add word"), self.open_add_word)
+        self._header_overflow_menu.addAction(
+            self._icon("filter"), tr("Search scope…"), self.show_search_scope_menu)
+        self.header_overflow_btn.setMenu(self._header_overflow_menu)
+        self.header_overflow_btn.setVisible(False)
+        h.addWidget(self.header_overflow_btn, 0, Qt.AlignVCenter)
 
         # the search box and its content actions stay grouped and centred; the
         # global sync button sits with the window controls at the far right
@@ -656,6 +686,17 @@ class MainWindow(QMainWindow):
         self.favorites_btn.setCursor(Qt.PointingHandCursor)
         self.favorites_btn.toggled.connect(self._on_favorites_toggled)
         f.addWidget(self.favorites_btn)
+
+        # Holds the Status/Language/Translation filters when their columns are
+        # collapsed away at narrow widths (see _apply_responsive_columns); hidden
+        # until at least one of those columns is responsively hidden.
+        self.more_filters_btn = QPushButton(tr(" Filters"), objectName="chipButton")
+        self.more_filters_btn.setIcon(self._icon("sliders", "text_dim", 16))
+        self.more_filters_btn.setCursor(Qt.PointingHandCursor)
+        self.more_filters_btn.setToolTip(tr("Filters that don't fit the table"))
+        self.more_filters_btn.clicked.connect(self._toggle_filter_popover)
+        self.more_filters_btn.setVisible(False)
+        f.addWidget(self.more_filters_btn)
 
         f.addStretch(1)
         self.filter_row = filters
@@ -806,6 +847,18 @@ class MainWindow(QMainWindow):
         self.lang1_combo = self._header_filters[COL_LANG1]
         self.lang2_combo = self._header_filters[COL_LANG2]
 
+        # Responsive columns: columns we've auto-hidden because the table is too
+        # narrow, and the header filters currently re-homed into the popover.
+        self._responsive_hidden = set()
+        self._popover_filters = []  # filter columns now living in the popover
+        self._filter_names = {COL_STATUS: tr("Status"), COL_LANG1: tr("Language"),
+                              COL_LANG2: tr("Translation")}
+        self._filter_popover = QFrame(self, objectName="FilterPopover")
+        self._filter_popover.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint)
+        self._filter_popover_form = QVBoxLayout(self._filter_popover)
+        self._filter_popover_form.setContentsMargins(12, 12, 12, 12)
+        self._filter_popover_form.setSpacing(8)
+
         table_header.sectionResized.connect(self._position_header_filters)
         table_header.geometriesChanged.connect(self._position_header_filters)
         self.table.horizontalScrollBar().valueChanged.connect(self._position_header_filters)
@@ -817,10 +870,10 @@ class MainWindow(QMainWindow):
         self._col_fit_timer = QTimer(self)
         self._col_fit_timer.setSingleShot(True)
         self._col_fit_timer.setInterval(80)
-        self._col_fit_timer.timeout.connect(self._fit_word_columns)
+        self._col_fit_timer.timeout.connect(self._apply_responsive_columns)
         self._col_fit_elapsed = QElapsedTimer()
         self._col_fit_elapsed.start()
-        QTimer.singleShot(0, self._fit_word_columns)
+        QTimer.singleShot(0, self._apply_responsive_columns)
 
         self.table_stack.addWidget(self.table)               # index 0
         self.table_stack.addWidget(self._build_words_empty())  # index 1
@@ -862,6 +915,8 @@ class MainWindow(QMainWindow):
         if header.minimumHeight() < needed:
             header.setMinimumHeight(needed)
         for col, combo in self._header_filters.items():
+            if col in self._popover_filters:
+                continue  # combo currently lives in the "Filters" popover
             if self.table.isColumnHidden(col):
                 combo.hide()
                 continue
@@ -871,6 +926,74 @@ class MainWindow(QMainWindow):
             combo.setGeometry(x + 2, (header.height() - ch) // 2, w - 4, ch)
             combo.show()
 
+    # Search stays a full field until it can't keep this width; below that it
+    # collapses to an icon, and only when even the buttons won't fit do they fold.
+    _USABLE_SEARCH = 180
+
+    def _measure_header_metrics(self):
+        """Cache the natural widths of the header controls (once, while they're
+        all visible) so the staged collapse can be decided from real sizes."""
+        if self._header_metrics is not None:
+            return self._header_metrics
+        if not (self.add_button.isVisible() and self.search_scope_btn.isVisible()):
+            return None  # not in the full layout yet; decide later
+        self._header_metrics = {
+            "title": self._title_widget.sizeHint().width(),
+            "add": self.add_button.sizeHint().width(),
+            "scope": self.search_scope_btn.sizeHint().width(),
+            "overflow": self.header_overflow_btn.sizeHint().width(),
+            "sync": self.sync_button.sizeHint().width(),
+            "controls": self.window_controls.sizeHint().width(),
+        }
+        return self._header_metrics
+
+    def _apply_responsive_header(self, index=None):
+        """Stage the header's collapse as the window narrows (search to an icon
+        first, then the Add/Search-scope buttons into a "⋯"), so the Words header
+        is never wider than the Texts header and the window can shrink to match."""
+        if not hasattr(self, "_topbar") or not hasattr(self, "add_button"):
+            return
+        if index is None:
+            index = self.stack.currentIndex()
+        on_words = index == PAGE_WORDS
+        m = self._measure_header_metrics()
+        content_w = self.width() - 58  # minus the fixed icon sidebar
+        if m is None:
+            search_collapsed, buttons_collapsed = self._header_compact, self._buttons_collapsed
+        else:
+            sp = self._topbar.layout().spacing()
+            base = m["title"] + m["sync"] + m["controls"] + 32 + sp * 5
+            remaining = content_w - base
+            # the Add/Search-scope cluster only exists on the Words tab; on Texts
+            # there are no such buttons, so the search keeps its width far longer.
+            cluster = (m["add"] + m["scope"] + sp * 2) if on_words else 0
+            search_collapsed = remaining < self._USABLE_SEARCH + cluster
+            buttons_collapsed = on_words and remaining < 36 + cluster
+        self._header_compact = search_collapsed
+        self._buttons_collapsed = buttons_collapsed
+        self.search_field.set_compact(search_collapsed)
+        self._update_header_layout(index)
+
+    def _update_header_layout(self, index=None):
+        """Show/hide the header's contextual controls. While the search field is
+        open in compact mode, the title, the "⋯" stand-in and the sync button
+        step aside so the search has room to show what you type."""
+        if index is None:
+            index = self.stack.currentIndex()
+        on_words = index == PAGE_WORDS
+        searching = self.search_field.is_open()
+        self._title_widget.setVisible(not searching)
+        self.add_button.setVisible(on_words and not self._buttons_collapsed)
+        self.search_scope_btn.setVisible(on_words and not self._buttons_collapsed)
+        self.header_overflow_btn.setVisible(
+            on_words and self._buttons_collapsed and not searching)
+        self.sync_button.setVisible(self.sync_enabled and not searching)
+
+    def _on_search_expanded(self, expanded):
+        # the search opened/closed in compact mode — re-evaluate which header
+        # controls yield room for it.
+        self._update_header_layout()
+
     def showEvent(self, event):
         super().showEvent(event)
         # When launched with --minimized the window is shown for the first time
@@ -878,14 +1001,16 @@ class MainWindow(QMainWindow):
         # so the word columns were sized to a stale/narrow viewport, leaving
         # empty space on the right. Refit once the real geometry is in place.
         if hasattr(self, '_col_fit_timer'):
-            QTimer.singleShot(0, self._fit_word_columns)
+            QTimer.singleShot(0, self._apply_responsive_columns)
+        self._apply_responsive_header()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if not hasattr(self, '_col_fit_timer'):
             return
+        self._apply_responsive_header()
         if self._col_fit_elapsed.elapsed() >= self._col_fit_timer.interval():
-            self._fit_word_columns()
+            self._apply_responsive_columns()
         else:
             self._col_fit_timer.start()
         if getattr(self, "_tour", None) is not None:
@@ -908,6 +1033,53 @@ class MainWindow(QMainWindow):
             self.table.resizeColumnToContents(col)        # uses delegate sizeHint
             width = max(self.table.columnWidth(col), self._meta_col_min[col])
             self.table.setColumnWidth(col, min(width, 320))  # cap runaway widths
+        self._apply_responsive_columns()
+
+    # Meta columns hidden first → last as the table narrows. Languages go before
+    # Status (kept longest); optional Created/Source go before everything.
+    _RESPONSIVE_DROP_ORDER = (COL_CREATED, COL_SOURCE, COL_LANG2, COL_LANG1, COL_STATUS)
+    _MIN_WORD_COL = 110  # keep each word column at least this readable
+
+    def _apply_responsive_columns(self):
+        """Progressively hide meta columns when the table is too narrow to give
+        the Word/Translation columns a readable width, restoring them as it
+        widens. Filters for hidden Status/Language columns move to a popover."""
+        if not hasattr(self, "_meta_col_min"):
+            return
+        table = self.table
+        viewport_w = table.viewport().width()
+        if viewport_w <= 1:
+            return
+
+        def col_w(col):  # assumed width even while hidden
+            w = table.columnWidth(col)
+            return w if w > 0 else self._meta_col_min.get(col, 130)
+
+        # What the user wants visible, ignoring width (Source/Created are opt-in).
+        wanted = {COL_STATUS, COL_LANG1, COL_LANG2}
+        if self.show_source:
+            wanted.add(COL_SOURCE)
+        if self.show_created:
+            wanted.add(COL_CREATED)
+
+        rownum_w = table.columnWidth(COL_ROWNUM)
+        visible = set(wanted)
+        for col in self._RESPONSIVE_DROP_ORDER:
+            fixed = rownum_w + sum(col_w(c) for c in visible)
+            if viewport_w - fixed >= 2 * self._MIN_WORD_COL:
+                break
+            visible.discard(col)
+
+        for col in (COL_STATUS, COL_LANG1, COL_LANG2, COL_SOURCE, COL_CREATED):
+            show = col in visible
+            if show and table.isColumnHidden(col):
+                table.setColumnHidden(col, False)
+                self._responsive_hidden.discard(col)
+            elif not show and not table.isColumnHidden(col):
+                table.setColumnHidden(col, True)
+                self._responsive_hidden.add(col)
+
+        self._sync_filter_popover()
         self._fit_word_columns()
 
     def _fit_word_columns(self):
@@ -923,6 +1095,66 @@ class MainWindow(QMainWindow):
         available = max(100, viewport_w - fixed)
         self.table.setColumnWidth(COL_WORD1, available // 2)
         self.table.setColumnWidth(COL_WORD2, available - available // 2)
+
+    # ---------- "Filters" popover for responsively-hidden header filters -------
+    def _sync_filter_popover(self):
+        """Re-home the Status/Language/Translation filter combos: into the
+        popover while their columns are hidden, back onto the header when shown."""
+        hidden = [c for c in (COL_STATUS, COL_LANG1, COL_LANG2)
+                  if c in self._responsive_hidden]
+        if hidden == self._popover_filters:
+            return
+        self._popover_filters = hidden
+        # Detach every filter combo to a safe parent FIRST, so clearing the old
+        # popover rows (which nested combos) can't delete a combo with its row.
+        header = self.table.horizontalHeader()
+        for combo in self._header_filters.values():
+            combo.setParent(header)
+            combo.setMinimumWidth(0)  # header sections are narrow; popover re-sets it
+        while self._filter_popover_form.count():
+            item = self._filter_popover_form.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        # Re-home the hidden columns' combos into fresh popover rows.
+        for col in (COL_STATUS, COL_LANG1, COL_LANG2):
+            if col not in hidden:
+                continue
+            row = QWidget(self._filter_popover)
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(8)
+            label = QLabel(self._filter_names[col], objectName="dimLabel")
+            label.setMinimumWidth(96)
+            rl.addWidget(label)
+            combo = self._header_filters[col]
+            combo.setParent(row)
+            combo.setMinimumWidth(160)
+            combo.show()
+            rl.addWidget(combo, 1)
+            self._filter_popover_form.addWidget(row)
+        self.more_filters_btn.setVisible(bool(hidden))
+        self._update_more_filters_active()
+        if not hidden and self._filter_popover.isVisible():
+            self._filter_popover.hide()
+        self._position_header_filters()
+
+    def _toggle_filter_popover(self):
+        pop = self._filter_popover
+        if pop.isVisible():
+            pop.hide()
+            return
+        pop.adjustSize()
+        btn = self.more_filters_btn
+        below = btn.mapToGlobal(btn.rect().bottomLeft())
+        x, y = below.x(), below.y() + 4
+        screen = btn.screen().availableGeometry()
+        # keep the popover fully on screen: align its right edge to the button's
+        # right when it would otherwise overflow the right edge of the display.
+        if x + pop.width() > screen.right():
+            x = btn.mapToGlobal(btn.rect().bottomRight()).x() - pop.width()
+        x = max(screen.left(), min(x, screen.right() - pop.width()))
+        pop.move(x, y)
+        pop.show()
 
     def _lock_filter_row_height(self):
         """Fix the filter row height so swapping chips/actions can't shift
@@ -1179,12 +1411,11 @@ class MainWindow(QMainWindow):
 
         on_words = index == PAGE_WORDS
         on_stats = index == PAGE_STATS
-        self.add_button.setVisible(on_words)
-        self.search_scope_btn.setVisible(on_words)
-        self.search_box.setVisible(not on_stats)
+        self._apply_responsive_header(index)  # add/scope: words-only & when wide
+        self.search_field.setVisible(not on_stats)
         subtitle = (self._words_subtitle if on_words
                     else tr("Statistics") if on_stats else tr("Texts"))
-        self.source_label.setText(subtitle)
+        self.source_label.set_full_text(subtitle)
         self._update_file_view()
 
         if index == PAGE_TEXTS:
@@ -1250,7 +1481,7 @@ class MainWindow(QMainWindow):
             self._file_view = False
             self._update_file_view()
             if self.stack.currentIndex() == PAGE_WORDS:
-                self.source_label.setText(self._words_subtitle)
+                self.source_label.set_full_text(self._words_subtitle)
             elif self.stack.currentIndex() == PAGE_STATS:
                 self._refresh_stats()
             logging.info("Database loaded successfully.")
@@ -1319,7 +1550,21 @@ class MainWindow(QMainWindow):
             self.refresh_display()
 
     def on_filters_changed(self, *_):
+        self._update_more_filters_active()
         self.refresh_display()
+
+    def _update_more_filters_active(self):
+        """Accent the "Filters" chip while a collapsed-away filter is in use, so
+        an active-but-hidden Status/Language filter stays discoverable."""
+        if not hasattr(self, "more_filters_btn"):
+            return
+        active = any(self._header_filters[c].currentIndex() > 0
+                     for c in self._popover_filters)
+        self.more_filters_btn.setIcon(
+            self._icon("sliders", "accent" if active else "text_dim", 16))
+        self.more_filters_btn.setProperty("active", active)
+        self.more_filters_btn.style().unpolish(self.more_filters_btn)
+        self.more_filters_btn.style().polish(self.more_filters_btn)
 
     def show_search_scope_menu(self):
         menu = QMenu(self)
@@ -1362,7 +1607,9 @@ class MainWindow(QMainWindow):
 
         self._empty_sub = QLabel(objectName="dimLabel", alignment=Qt.AlignCenter)
         self._empty_sub.setWordWrap(True)
-        self._empty_sub.setFixedWidth(380)  # fixed so the wrapped height resolves
+        # 355 keeps this page's floor in line with the Texts page (~403) so the
+        # window can shrink equally on both and switching tabs never resizes.
+        self._empty_sub.setFixedWidth(355)  # fixed so the wrapped height resolves
         outer.addWidget(self._empty_sub, 0, Qt.AlignHCenter)
         outer.addSpacing(18)
 
@@ -1516,16 +1763,18 @@ class MainWindow(QMainWindow):
 
 
     def toggle_source_column(self, checked):
-        self.table.setColumnHidden(COL_SOURCE, not checked)
-        if checked:
+        self.show_source = checked  # user intent; width decides actual visibility
+        if checked and self.table.isColumnHidden(COL_SOURCE):
+            self.table.setColumnHidden(COL_SOURCE, False)
             self.table.resizeColumnToContents(COL_SOURCE)
-        self._fit_word_columns()
+        self._apply_responsive_columns()
 
     def toggle_created_column(self, checked):
-        self.table.setColumnHidden(COL_CREATED, not checked)
-        if checked:
+        self.show_created = checked  # user intent; width decides actual visibility
+        if checked and self.table.isColumnHidden(COL_CREATED):
+            self.table.setColumnHidden(COL_CREATED, False)
             self.table.resizeColumnToContents(COL_CREATED)
-        self._fit_word_columns()
+        self._apply_responsive_columns()
 
     def prompt_row_limit(self):
         from app.ui.dialogs.base import ask_int
@@ -2111,7 +2360,7 @@ class MainWindow(QMainWindow):
             self._words_subtitle = os.path.basename(path)
             self._file_view = True
             self.switch_page(PAGE_WORDS)
-            self.source_label.setText(self._words_subtitle)
+            self.source_label.set_full_text(self._words_subtitle)
             self._update_file_view()
         except Exception as exc:
             logging.error(f"Error importing file: {exc}")
