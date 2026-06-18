@@ -249,6 +249,7 @@ QPushButton#iconButton {{
 }}
 QPushButton#iconButton:hover {{ background: {c['surface_alt']}; }}
 QPushButton#iconButton:checked {{ background: {c['selection']}; }}
+QPushButton#iconButton::menu-indicator {{ image: none; width: 0px; }}
 QPushButton#chipButton {{
     border-radius: 14px;
     padding: 5px 14px;

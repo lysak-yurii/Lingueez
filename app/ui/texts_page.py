@@ -38,8 +38,8 @@ from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QTextC
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame,
     QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMenu, QMessageBox, QPushButton, QSplitter, QStackedLayout,
-    QStyle, QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
+    QListWidgetItem, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
+    QStackedLayout, QStyle, QStyledItemDelegate, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from app.config import get_float, get_int, load_settings, save_settings
@@ -54,7 +54,7 @@ from app.ui.dialogs.base import ask_item
 from app.ui.dialogs.definition import markup_to_html
 from app.ui.reader import ReaderPlayer, ReaderToolbar, _sentence_spans
 from app.ui.toast import show_toast
-from app.ui.widgets import ElidedLabel
+from app.ui.widgets import ContentComboBox, ElidedLabel, FlowLayout, OverflowToolBar
 from app.ui.word_popup import WordPopup
 from app.ui.workers import run_in_thread
 
@@ -285,30 +285,29 @@ class TextsPage(QWidget):
         toolbar.addStretch(1)
         ll.addLayout(toolbar)
 
-        filter_row = QHBoxLayout()
-        filter_row.setSpacing(8)
-        self.lang_filter = QComboBox()
-        self.lang_filter.setMinimumWidth(120)
+        # Filters live in a flow layout so they reflow onto extra rows when the
+        # panel is narrow, instead of clipping (e.g. a long localized "Newest
+        # first" squeezing the language filter down to its arrow). ContentComboBox
+        # keeps each one sized to its current text, not its widest option.
+        self.lang_filter = ContentComboBox()
         self.lang_filter.addItem(ALL_LANGUAGES)
         self.lang_filter.currentTextChanged.connect(self._refresh_list)
-        filter_row.addWidget(self.lang_filter, 1)
-        self.sort_combo = QComboBox()
+        self.sort_combo = ContentComboBox()
         self.sort_combo.addItems([SORT_NEWEST, SORT_OLDEST, SORT_TITLE])
         self.sort_combo.currentTextChanged.connect(self._refresh_list)
-        filter_row.addWidget(self.sort_combo)
-        ll.addLayout(filter_row)
-
-        filter_row2 = QHBoxLayout()
-        filter_row2.setSpacing(8)
-        self.level_filter = QComboBox()
+        self.level_filter = ContentComboBox()
         self.level_filter.addItem(ALL_LEVELS)
         self.level_filter.currentTextChanged.connect(self._refresh_list)
-        filter_row2.addWidget(self.level_filter, 1)
-        self.topic_filter = QComboBox()
+        self.topic_filter = ContentComboBox()
         self.topic_filter.addItem(ALL_TOPICS)
         self.topic_filter.currentTextChanged.connect(self._refresh_list)
-        filter_row2.addWidget(self.topic_filter, 1)
-        ll.addLayout(filter_row2)
+
+        filters_host = QWidget()
+        filters_flow = FlowLayout(filters_host, hspacing=8, vspacing=8)
+        for combo in (self.lang_filter, self.sort_combo,
+                      self.level_filter, self.topic_filter):
+            filters_flow.addWidget(combo)
+        ll.addWidget(filters_host)
 
         self.listing = QListWidget(objectName="TextsList")
         self.listing.setMouseTracking(True)
@@ -349,37 +348,52 @@ class TextsPage(QWidget):
         top.setSpacing(4)
         self.title_edit = QLineEdit(objectName="ReaderTitle")
         self.title_edit.setPlaceholderText(tr("Title"))
+        # Elide rather than hold a width, so the header can be squeezed — but
+        # keep a floor so the title never collapses to nothing.
+        self.title_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.title_edit.setMinimumWidth(80)
         self.title_edit.textEdited.connect(self._mark_dirty)
         top.addWidget(self.title_edit, 1)
+
+        # The action buttons collapse into a "⋯" menu when the reader is narrow,
+        # so the toolbar never pins the page (and window) wide.
         self.tts_btn = self._icon_button("volume", "text", tr("Read aloud"), self.toggle_reading)
-        top.addWidget(self.tts_btn)
         self.translate_btn = self._icon_button(
             "translate", "text", tr("Translate text"), self.toggle_translation)
-        top.addWidget(self.translate_btn)
         self.trans_lang_btn = self._icon_button(
             "chevron-down", "text", tr("Translation language"),
             self._pick_translation_language, size=12)
-        top.addWidget(self.trans_lang_btn)
         self.focus_btn = self._icon_button(
             "book-open", "text", tr("Focus mode"), self.toggle_focus)
-        top.addWidget(self.focus_btn)
         self.paper_btn = self._icon_button(
             "book", "text", tr("Paper mode"), self.toggle_paper)
         self.paper_btn.setCheckable(True)
-        top.addWidget(self.paper_btn)
         self.edit_btn = self._icon_button("edit", "text", tr("Edit text"), self._on_edit_toggled)
         self.edit_btn.setCheckable(True)
-        top.addWidget(self.edit_btn)
         delete_btn = self._icon_button("trash", "danger", tr("Delete text"), self.delete_current)
-        top.addWidget(delete_btn)
+
+        self._reader_tools = OverflowToolBar(self._colors)
+        # Added in display order; higher priority stays in the bar longer, so the
+        # lowest-priority buttons drop into the menu first as width tightens.
+        self._reader_tools.add_button(self.tts_btn, priority=100)
+        self._reader_tools.add_button(self.translate_btn, priority=90)
+        self._reader_tools.add_button(self.trans_lang_btn, priority=40)
+        self._reader_tools.add_button(self.focus_btn, priority=60)
+        self._reader_tools.add_button(self.paper_btn, priority=50)
+        self._reader_tools.add_button(self.edit_btn, priority=80)
+        self._reader_tools.add_button(delete_btn, priority=30)
+        top.addWidget(self._reader_tools, 0)
         cv.addLayout(top)
 
-        meta = QHBoxLayout()
-        meta.setSpacing(10)
-        self.language_combo = QComboBox()
+        # Meta controls also flow: when the reader is narrow the created date
+        # drops to its own line rather than the language combo getting clipped.
+        meta_host = QWidget()
+        meta = FlowLayout(meta_host, hspacing=10, vspacing=6)
+        self.language_combo = ContentComboBox()
         self.language_combo.setEditable(True)
         fill_lang_combo(self.language_combo, sorted(lang_codes.keys()))
         self.language_combo.editTextChanged.connect(self._mark_dirty)
+        self.language_combo.editTextChanged.connect(self.language_combo.updateGeometry)
         meta.addWidget(self.language_combo)
         self.level_combo = QComboBox()
         self.level_combo.addItems([""] + CEFR_LEVELS)
@@ -391,10 +405,10 @@ class TextsPage(QWidget):
         self.topic_edit.setMaximumWidth(160)
         self.topic_edit.textEdited.connect(self._mark_dirty)
         meta.addWidget(self.topic_edit)
-        self.created_label = QLabel("", objectName="dimLabel")
+        self.created_label = ElidedLabel(min_width=110)  # truncate a little, then wrap
+        self.created_label.setObjectName("dimLabel")
         meta.addWidget(self.created_label)
-        meta.addStretch(1)
-        cv.addLayout(meta)
+        cv.addWidget(meta_host)
 
         self.words_line = ElidedLabel()
         self.words_line.setObjectName("dimLabel")
@@ -475,7 +489,10 @@ class TextsPage(QWidget):
         """Full-width empty state shown when there are no texts at all."""
         page = QWidget()
         outer = QVBoxLayout(page)
-        outer.setContentsMargins(24, 24, 24, 24)
+        # Small horizontal margins: this page already sits inside the root
+        # layout's 16px side padding, so a full 24px here would double it and
+        # make the empty state set a wider floor than the Words page.
+        outer.setContentsMargins(8, 24, 8, 24)
         outer.addStretch(2)
 
         self._tempty_icon = QLabel(alignment=Qt.AlignCenter)
@@ -495,8 +512,11 @@ class TextsPage(QWidget):
                "Internet, or import a .txt file."),
             objectName="dimLabel", alignment=Qt.AlignCenter)
         self._tempty_sub.setWordWrap(True)
-        self._tempty_sub.setFixedWidth(420)
-        self._tempty_sub.setFixedHeight(self._tempty_sub.heightForWidth(420))
+        # Keep this page's floor at or below the rest of the app (the Words page is
+        # ~428) so switching to Texts never grows the window. 348 = the Words empty
+        # state's 380 minus this page's 16+16px outer margins.
+        self._tempty_sub.setFixedWidth(348)
+        self._tempty_sub.setFixedHeight(self._tempty_sub.heightForWidth(348))
         outer.addWidget(self._tempty_sub, 0, Qt.AlignHCenter)
         outer.addSpacing(18)
 
@@ -558,6 +578,7 @@ class TextsPage(QWidget):
         self.listing.viewport().update()
         for btn, name, color_key, size in self._themed:
             btn.setIcon(icons.icon(name, colors[color_key], size))
+        self._reader_tools.refresh_theme(colors)  # re-tint "⋯" + rebuild its menu
         if self.is_reading:
             self.tts_btn.setIcon(icons.icon("stop", colors["danger"], 18))
         if self.edit_btn.isChecked():
@@ -822,8 +843,9 @@ class TextsPage(QWidget):
         level = str(text.get('Level') or "").strip()
         self.level_combo.setCurrentText(level if level in CEFR_LEVELS else "")
         self.topic_edit.setText(str(text.get('Category') or "").strip())
+        self.topic_edit.setCursorPosition(0)  # show the start, not the end, when narrow
         created = str(text.get('created_at') or "")[:16].replace("T", " ")
-        self.created_label.setText(
+        self.created_label.set_full_text(
             tr("Created {date}").format(date=created) if created else "")
         words = str(text.get('Words') or "").strip()
         self.words_line.set_full_text(

@@ -20,14 +20,138 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """Small reusable widgets."""
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QColorDialog, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-    QToolButton, QWidget,
+    QCheckBox, QColorDialog, QComboBox, QGridLayout, QHBoxLayout, QLabel, QLayout,
+    QMenu, QPushButton, QSizePolicy, QStyle, QStyleOptionComboBox, QToolButton,
+    QWidget,
 )
 
 from app.i18n import tr
+from app.ui import icons
+
+
+class ContentComboBox(QComboBox):
+    """Combo that sizes to its *current* text — not the widest item in the list,
+    which is what `AdjustToContents` does and what makes a short selection (e.g.
+    one language) hog space because some other option is long. The drop-down
+    popup still widens to show every option in full. A small minimum lets a
+    FlowLayout truncate or wrap it when space is tight.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.currentTextChanged.connect(self.updateGeometry)
+
+    def _size_for(self, text):
+        self.ensurePolished()
+        fm = self.fontMetrics()
+        opt = QStyleOptionComboBox()
+        self.initStyleOption(opt)
+        content = QSize(fm.horizontalAdvance(text) + 4, fm.height())
+        return self.style().sizeFromContents(QStyle.CT_ComboBox, opt, content, self)
+
+    def sizeHint(self):
+        return self._size_for(self.currentText())
+
+    def minimumSizeHint(self):
+        return self._size_for("oooo")  # ~4 chars: a small, truncatable floor
+
+    def showPopup(self):
+        # Widen the list to its longest entry so full names stay readable.
+        fm = self.view().fontMetrics()
+        widest = max((fm.horizontalAdvance(self.itemText(i))
+                      for i in range(self.count())), default=0)
+        self.view().setMinimumWidth(widest + 48)
+        super().showPopup()
+
+
+class FlowLayout(QLayout):
+    """Left-to-right layout that lets each item truncate into the remaining row
+    space (down to its minimum width) before wrapping onto a new row — so a row
+    of controls compresses a little, then reflows, instead of clipping. Its
+    minimum width is the widest single item's minimum, keeping the host
+    narrow-friendly.
+    """
+
+    def __init__(self, parent=None, hspacing=8, vspacing=6):
+        super().__init__(parent)
+        self._items = []
+        self._hspace = hspacing
+        self._vspace = vspacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    # --- QLayout plumbing --------------------------------------------------
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    # --- wrapping ----------------------------------------------------------
+    def _do_layout(self, rect, test_only):
+        m = self.contentsMargins()
+        left = rect.x() + m.left()
+        right = rect.right() - m.right()
+        x = left
+        y = rect.y() + m.top()
+        row = []            # (item, x, width, height) buffered to center vertically
+        row_height = 0
+
+        def place_row():
+            nonlocal y
+            for item, ix, iw, ih in row:
+                if not test_only:
+                    off = max(0, (row_height - ih) // 2)  # center within the row
+                    item.setGeometry(QRect(QPoint(ix, y + off), QSize(iw, ih)))
+            y += row_height + self._vspace
+
+        for item in self._items:
+            hint = item.sizeHint()
+            mn = item.minimumSize().width()
+            avail = right - x
+            if row and avail < mn:               # even truncated it won't fit: wrap
+                place_row()
+                row, x, row_height = [], left, 0
+                avail = right - x
+            w = max(mn, min(hint.width(), avail))  # truncate into the room we have
+            row.append((item, x, w, hint.height()))
+            x += w + self._hspace
+            row_height = max(row_height, hint.height())
+        if row:
+            place_row()
+        return y - self._vspace + m.bottom() - rect.y()
 
 
 class ElidedLabel(QLabel):
@@ -68,6 +192,107 @@ class ElidedLabel(QLabel):
     def _refit(self):
         fm = self.fontMetrics()
         self.setText(fm.elidedText(self._full, Qt.ElideRight, max(0, self.width() - 2)))
+
+
+class OverflowToolBar(QWidget):
+    """A horizontal row of icon buttons that collapses low-priority buttons
+    into a trailing "⋯" menu when there isn't room to show them all.
+
+    Callers create the buttons as usual and keep their references (signals stay
+    connected); only visibility changes with width. The widget reports a minimum
+    width of just one button plus the overflow control, so — like `ElidedLabel`
+    — it never pins its container wide.
+    """
+
+    def __init__(self, colors, parent=None):
+        super().__init__(parent)
+        self._colors = colors
+        self._items = []  # [{"btn": QAbstractButton, "prio": int}], in display order
+        self._relaying = False
+
+        self._row = QHBoxLayout(self)
+        self._row.setContentsMargins(0, 0, 0, 0)
+        self._row.setSpacing(4)
+
+        self._menu = QMenu(self)
+        self._overflow = QPushButton(objectName="iconButton")
+        self._overflow.setIcon(icons.icon("more", colors["text"], 18))
+        self._overflow.setIconSize(QSize(18, 18))
+        self._overflow.setToolTip(tr("More actions"))
+        self._overflow.setCursor(Qt.PointingHandCursor)
+        self._overflow.setMenu(self._menu)
+        self._overflow.hide()
+        self._row.addWidget(self._overflow)
+
+    def add_button(self, button, priority=0):
+        """Add an action button. Lower `priority` buttons collapse into the
+        menu first when space runs out; display order follows insertion order."""
+        self._row.insertWidget(self._row.count() - 1, button)  # before overflow
+        self._items.append({"btn": button, "prio": priority})
+
+    # --- sizing -----------------------------------------------------------
+    def sizeHint(self):
+        # Preferred: every button shown, overflow hidden.
+        sp = self._row.spacing()
+        w = sum(it["btn"].sizeHint().width() for it in self._items)
+        w += sp * max(0, len(self._items) - 1)
+        return QSize(w, self._row.sizeHint().height())
+
+    def minimumSizeHint(self):
+        # Just the widest single button + the overflow control: usable, yet
+        # small enough never to widen the window.
+        btn_w = max((it["btn"].sizeHint().width() for it in self._items), default=0)
+        ow = self._overflow.sizeHint().width() + self._row.spacing()
+        return QSize(btn_w + ow, self._row.sizeHint().height())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout()
+
+    def _relayout(self):
+        if self._relaying or not self._items:
+            return
+        self._relaying = True
+        avail = self.width()
+        sp = self._row.spacing()
+        widths = {id(it["btn"]): it["btn"].sizeHint().width() for it in self._items}
+        full = sum(widths.values()) + sp * (len(self._items) - 1)
+        if full <= avail:
+            hidden = []
+        else:
+            reserve = self._overflow.sizeHint().width() + sp
+            used, keep = 0, set()
+            for it in sorted(self._items, key=lambda it: -it["prio"]):
+                w = widths[id(it["btn"])] + sp
+                if used + w + reserve <= avail:
+                    used += w
+                    keep.add(id(it["btn"]))
+                else:
+                    break
+            hidden = [it for it in self._items if id(it["btn"]) not in keep]
+        self._apply(hidden)
+        self._relaying = False
+
+    def _apply(self, hidden):
+        hidden_ids = {id(it["btn"]) for it in hidden}
+        for it in self._items:
+            it["btn"].setVisible(id(it["btn"]) not in hidden_ids)
+        self._menu.clear()
+        for it in hidden:  # keep display order in the menu
+            btn = it["btn"]
+            act = self._menu.addAction(btn.icon(), btn.toolTip())
+            if btn.isCheckable():
+                act.setCheckable(True)
+                act.setChecked(btn.isChecked())
+            act.triggered.connect(lambda _=False, b=btn: b.click())
+        self._overflow.setVisible(bool(hidden))
+
+    def refresh_theme(self, colors):
+        """Re-tint the overflow control and rebuild the menu (icons may have
+        changed). Call after the member buttons have themselves been re-tinted."""
+        self._colors = colors
+        self._overflow.setIcon(icons.icon("more", colors["text"], 18))
+        self._relayout()
 
 
 class ColorButton(QWidget):
