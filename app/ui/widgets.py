@@ -329,6 +329,7 @@ class OverflowToolBar(QWidget):
         self._colors = colors
         self._items = []  # [{"btn": QAbstractButton, "prio": int}], in display order
         self._relaying = False
+        self._relayout_pending = False
 
         self._row = QHBoxLayout(self)
         self._row.setContentsMargins(0, 0, 0, 0)
@@ -371,28 +372,43 @@ class OverflowToolBar(QWidget):
         self._relayout()
 
     def _relayout(self):
-        if self._relaying or not self._items:
+        if not self._items:
+            return
+        if self._relaying:
+            # A relayout was requested while we're mid-apply: showing/hiding the
+            # buttons can resize this bar to its final width, and that corrective
+            # resize must not be dropped — otherwise the bar sticks in the
+            # collapsed state computed from the smaller transient width, clearing
+            # only on a later manual resize. Re-run with the new width instead.
+            self._relayout_pending = True
             return
         self._relaying = True
-        avail = self.width()
-        sp = self._row.spacing()
-        widths = {id(it["btn"]): it["btn"].sizeHint().width() for it in self._items}
-        full = sum(widths.values()) + sp * (len(self._items) - 1)
-        if full <= avail:
-            hidden = []
-        else:
-            reserve = self._overflow.sizeHint().width() + sp
-            used, keep = 0, set()
-            for it in sorted(self._items, key=lambda it: -it["prio"]):
-                w = widths[id(it["btn"])] + sp
-                if used + w + reserve <= avail:
-                    used += w
-                    keep.add(id(it["btn"]))
+        try:
+            for _ in range(4):  # converges in 1-2; cap guards against oscillation
+                self._relayout_pending = False
+                avail = self.width()
+                sp = self._row.spacing()
+                widths = {id(it["btn"]): it["btn"].sizeHint().width()
+                          for it in self._items}
+                full = sum(widths.values()) + sp * (len(self._items) - 1)
+                if full <= avail:
+                    hidden = []
                 else:
+                    reserve = self._overflow.sizeHint().width() + sp
+                    used, keep = 0, set()
+                    for it in sorted(self._items, key=lambda it: -it["prio"]):
+                        w = widths[id(it["btn"])] + sp
+                        if used + w + reserve <= avail:
+                            used += w
+                            keep.add(id(it["btn"]))
+                        else:
+                            break
+                    hidden = [it for it in self._items if id(it["btn"]) not in keep]
+                self._apply(hidden)
+                if not self._relayout_pending:
                     break
-            hidden = [it for it in self._items if id(it["btn"]) not in keep]
-        self._apply(hidden)
-        self._relaying = False
+        finally:
+            self._relaying = False
 
     def _apply(self, hidden):
         hidden_ids = {id(it["btn"]) for it in hidden}
