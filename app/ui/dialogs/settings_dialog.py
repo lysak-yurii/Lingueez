@@ -35,9 +35,12 @@ from PySide6.QtWidgets import (
 
 from app.config import get_bool, get_float, get_int, load_settings, save_settings
 from app.core import exporters, translator
+from app.core.auth_manager import get_auth_manager
 from app.i18n import available_languages, tr
 from app.system.autostart import get_autostart_enabled, set_autostart
+from app.ui.dialogs.account_dialog import AccountDialog
 from app.ui.dialogs.base import FramelessDialog
+from app.ui.toast import show_toast
 from app.ui.widgets import ColorButton, ColumnPicker
 from app.ui.workers import run_in_thread
 
@@ -583,30 +586,60 @@ class SettingsDialog(FramelessDialog):
         sync = QWidget()
         form = QFormLayout(sync)
         form.setContentsMargins(18, 18, 18, 18)
-        form.addRow(tr("Enable cloud sync"), self._check("enable_sync", False))
-        self.supabase_url_edit = QLineEdit(self.env.get("SUPABASE_URL", ""))
-        form.addRow(tr("Supabase URL (.env)"), self.supabase_url_edit)
-        self.supabase_key_edit = self._secret(QLineEdit(self.env.get("SUPABASE_KEY", "")))
-        form.addRow(tr("Supabase key (.env)"), self.supabase_key_edit)
-        test_btn = QPushButton(tr("Test Connection"))
-        test_btn.clicked.connect(self._test_supabase)
-        form.addRow(test_btn)
 
-        schema_note = QLabel(tr("Cloud sync uses your own Supabase project. Create the "
-                                "required tables once, then enter the URL and anon key above."))
-        schema_note.setObjectName("dimLabel")
-        schema_note.setWordWrap(True)
-        form.addRow(schema_note)
-        schema_row = QHBoxLayout()
-        copy_schema_btn = QPushButton(tr("Copy schema SQL"))
-        copy_schema_btn.clicked.connect(self._copy_schema_sql)
-        schema_row.addWidget(copy_schema_btn)
-        open_editor_btn = QPushButton(tr("Open SQL editor ↗"))
-        open_editor_btn.clicked.connect(lambda: QDesktopServices.openUrl(
-            QUrl("https://supabase.com/dashboard/project/_/sql/new")))
-        schema_row.addWidget(open_editor_btn)
-        schema_row.addStretch(1)
-        form.addRow(schema_row)
+        # --- Account (sync requires being signed in) ---
+        self.account_status = QLabel()
+        self.account_status.setWordWrap(True)
+        form.addRow(tr("Account"), self.account_status)
+        acct_row = QHBoxLayout()
+        self.signin_btn = QPushButton(tr("Sign in / Create account"))
+        self.signin_btn.clicked.connect(self._open_account_dialog)
+        self.signout_btn = QPushButton(tr("Sign out"))
+        self.signout_btn.clicked.connect(self._sign_out)
+        self.export_data_btn = QPushButton(tr("Export my data…"))
+        self.export_data_btn.clicked.connect(self._export_account_data)
+        self.delete_account_btn = QPushButton(tr("Delete account…"), objectName="dangerButton")
+        self.delete_account_btn.clicked.connect(self._delete_account)
+        for b in (self.signin_btn, self.signout_btn, self.export_data_btn, self.delete_account_btn):
+            acct_row.addWidget(b)
+        acct_row.addStretch(1)
+        form.addRow(acct_row)
+        self._refresh_account_ui()
+
+        form.addRow(tr("Enable cloud sync"), self._check("enable_sync", False))
+
+        # Bring-your-own Supabase project: hidden by default — the app ships with a
+        # built-in central project, so normal users just sign in. Set
+        # show_advanced=True in settings.cfg to point sync at your own project.
+        if self.show_advanced:
+            self.supabase_url_edit = QLineEdit(self.env.get("SUPABASE_URL", ""))
+            form.addRow(tr("Supabase URL (.env)"), self.supabase_url_edit)
+            self.supabase_key_edit = self._secret(QLineEdit(self.env.get("SUPABASE_KEY", "")))
+            form.addRow(tr("Supabase key (.env)"), self.supabase_key_edit)
+            test_btn = QPushButton(tr("Test Connection"))
+            test_btn.clicked.connect(self._test_supabase)
+            form.addRow(test_btn)
+
+            schema_note = QLabel(tr("To use your own Supabase project instead of the built-in "
+                                    "one, run the schema SQL there, enter its URL and anon key "
+                                    "above, then sign in. Each account's words stay private "
+                                    "(Row-Level Security is on). New sign-ups are verified by a "
+                                    "6-digit email code — configure SMTP and the confirm-signup "
+                                    "email template (see the schema comments)."))
+            schema_note.setObjectName("dimLabel")
+            schema_note.setWordWrap(True)
+            form.addRow(schema_note)
+            schema_row = QHBoxLayout()
+            copy_schema_btn = QPushButton(tr("Copy schema SQL"))
+            copy_schema_btn.clicked.connect(self._copy_schema_sql)
+            schema_row.addWidget(copy_schema_btn)
+            open_editor_btn = QPushButton(tr("Open SQL editor ↗"))
+            open_editor_btn.clicked.connect(lambda: QDesktopServices.openUrl(
+                QUrl("https://supabase.com/dashboard/project/_/sql/new")))
+            schema_row.addWidget(open_editor_btn)
+            schema_row.addStretch(1)
+            form.addRow(schema_row)
+
         form.addRow(tr("Bin cleanup grace (days)"), self._spin("cleanup_grace_period_days", 1, 365, 30))
         tabs.addTab(_scrollable(sync), tr("Sync"))
 
@@ -703,8 +736,12 @@ class SettingsDialog(FramelessDialog):
             "SUPABASE_KEY": self.supabase_key_edit.text().strip(),
         })
         try:
-            from app.core.supabase_client import SupabaseClient
-            client = SupabaseClient()
+            # Reconfigure the shared client so the typed creds take effect and the
+            # signed-in token (if any) is re-applied, then probe connectivity.
+            from app.core.supabase_client import get_supabase
+            client = get_supabase()
+            client.reconfigure()
+            get_auth_manager().refresh_if_needed()
             if client.is_connected():
                 QMessageBox.information(self, "Supabase", tr("Connection successful! ✅"))
             else:
@@ -712,6 +749,98 @@ class SettingsDialog(FramelessDialog):
                                     tr("Could not connect. Check the URL/key and your internet connection."))
         except Exception as exc:
             QMessageBox.critical(self, "Supabase", tr("Connection test failed:\n{error}").format(error=exc))
+
+    # ----------------------------------------------------------- account
+
+    def _sync_manager(self):
+        """Lazily build a SyncManager for account-scoped actions (export/delete).
+        It shares the process-wide client + auth, so it sees the current session."""
+        if getattr(self, "_sm", None) is None:
+            from app.core.sync_manager import SyncManager
+            self._sm = SyncManager()
+        return self._sm
+
+    def _refresh_account_ui(self):
+        auth = get_auth_manager()
+        logged_in = auth.is_logged_in()
+        if logged_in:
+            self.account_status.setText(
+                tr("Signed in as {email}").format(email=auth.current_user() or ""))
+        else:
+            self.account_status.setText(
+                tr("Not signed in. Sign in to sync your words across devices."))
+        self.signin_btn.setVisible(not logged_in)
+        for b in (self.signout_btn, self.export_data_btn, self.delete_account_btn):
+            b.setVisible(logged_in)
+
+    def _open_account_dialog(self):
+        # Advanced (bring-your-own) mode only: apply whatever URL/key is currently
+        # typed so sign-in works without the user having to Save and reopen Settings
+        # first. In normal mode there are no fields — the built-in central project is
+        # already live, so we just open the dialog.
+        if getattr(self, "supabase_url_edit", None) is not None:
+            url, key = self.supabase_url_edit.text().strip(), self.supabase_key_edit.text().strip()
+            if url and key and (url != self.env.get("SUPABASE_URL", "")
+                                or key != self.env.get("SUPABASE_KEY", "")):
+                _write_env({"SUPABASE_URL": url, "SUPABASE_KEY": key})
+                try:
+                    from app.core.supabase_client import get_supabase
+                    get_supabase().reconfigure()
+                except Exception:
+                    pass
+        dlg = AccountDialog(self, auth=get_auth_manager())
+        dlg.authenticated.connect(self._refresh_account_ui)
+        dlg.exec()
+        self._refresh_account_ui()
+
+    def _sign_out(self):
+        ok, msg = get_auth_manager().sign_out()
+        self._refresh_account_ui()
+        show_toast(self, tr("Account"), msg or tr("Signed out."),
+                   "success" if ok else "error")
+
+    def _export_account_data(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export my data…"), "lingueez-account-data.json",
+            tr("JSON files (*.json)"))
+        if not path:
+            return
+
+        def done(result):
+            ok, err = result
+            show_toast(self, tr("Account"),
+                       tr("Your data was exported.") if ok else (err or tr("Export failed.")),
+                       "success" if ok else "error", 6000)
+
+        run_in_thread(self._sync_manager().export_user_data, path, on_result=done,
+                      on_error=lambda e: show_toast(self, tr("Account"), str(e), "error", 6000))
+
+    def _delete_account(self):
+        confirm = QMessageBox.warning(
+            self, tr("Delete account"),
+            tr("This permanently deletes your account and ALL of your synced words, "
+               "texts and tags from the cloud. Your local copy is archived to the "
+               "backups folder. This cannot be undone.\n\nDelete your account?"),
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        if confirm != QMessageBox.Yes:
+            return
+
+        def done(result):
+            ok, err = result
+            if ok:
+                # Archive the local DB so the now-orphaned data isn't left behind.
+                try:
+                    self._sync_manager().archive_and_reset_local_db()
+                except Exception:
+                    pass
+                self._refresh_account_ui()
+                show_toast(self, tr("Account"), tr("Account deleted."), "success", 6000)
+            else:
+                show_toast(self, tr("Account"), err or tr("Could not delete the account."),
+                           "error", 7000)
+
+        run_in_thread(self._sync_manager().delete_account, on_result=done,
+                      on_error=lambda e: show_toast(self, tr("Account"), str(e), "error", 6000))
 
     def _update_translation_provider(self):
         """Show the DeepL fields only when DeepL is the selected provider."""
@@ -789,10 +918,12 @@ class SettingsDialog(FramelessDialog):
             env_updates["OPENAI_API_KEY"] = self.openai_key_edit.text().strip()
         if self.gemini_key_edit.text().strip() != self.env.get("GOOGLE_API_KEY", ""):
             env_updates["GOOGLE_API_KEY"] = self.gemini_key_edit.text().strip()
-        if self.supabase_url_edit.text().strip() != self.env.get("SUPABASE_URL", ""):
-            env_updates["SUPABASE_URL"] = self.supabase_url_edit.text().strip()
-        if self.supabase_key_edit.text().strip() != self.env.get("SUPABASE_KEY", ""):
-            env_updates["SUPABASE_KEY"] = self.supabase_key_edit.text().strip()
+        # Supabase URL/key fields only exist in advanced (bring-your-own) mode.
+        if getattr(self, "supabase_url_edit", None) is not None:
+            if self.supabase_url_edit.text().strip() != self.env.get("SUPABASE_URL", ""):
+                env_updates["SUPABASE_URL"] = self.supabase_url_edit.text().strip()
+            if self.supabase_key_edit.text().strip() != self.env.get("SUPABASE_KEY", ""):
+                env_updates["SUPABASE_KEY"] = self.supabase_key_edit.text().strip()
         if env_updates:
             _write_env(env_updates)
             if "OPENAI_API_KEY" in env_updates or "GOOGLE_API_KEY" in env_updates:

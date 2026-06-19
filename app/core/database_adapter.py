@@ -21,7 +21,7 @@
 
 import sqlite3
 from typing import Optional, List, Dict, Any
-from app.core.supabase_client import SupabaseClient
+from app.core.supabase_client import SupabaseClient, get_supabase
 import logging
 import os
 import json
@@ -43,7 +43,9 @@ class DatabaseAdapter:
         """
         self.use_cloud = use_cloud
         self.local_db = 'dictionary.db'
-        self.supabase = SupabaseClient() if use_cloud else None
+        # Share the process-wide client so the signed-in token (set by
+        # AuthManager) applies to direct CRUD here, not just to SyncManager.
+        self.supabase = get_supabase() if use_cloud else None
         self.cloud_available = self.supabase.is_connected() if self.supabase else False
         
         if use_cloud and not self.cloud_available:
@@ -64,7 +66,7 @@ class DatabaseAdapter:
         self.use_cloud = enabled
         if enabled:
             if self.supabase is None:
-                self.supabase = SupabaseClient()
+                self.supabase = get_supabase()
             else:
                 self.supabase.reconfigure()
         self.cloud_available = self.supabase.is_connected() if self.supabase else False

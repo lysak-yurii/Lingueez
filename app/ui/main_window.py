@@ -53,6 +53,7 @@ from app.core.backup_management import backup_database
 from app.core.database_adapter import DatabaseAdapter
 from app.core.shell_utils import suggest_filename
 from app.core.sync_manager import SyncManager
+from app.core.auth_manager import get_auth_manager
 from app.core.data_management import open_words_from_excel
 from app.ui import icons, theme
 from app.ui.animations import AnimatedStackedWidget, crossfade_during, fade_swap
@@ -245,6 +246,7 @@ class MainWindow(QMainWindow):
         self._cloud_connected = self.sync_enabled
         self.db_adapter = DatabaseAdapter(use_cloud=self.sync_enabled)
         self.sync_manager = SyncManager()
+        self.auth = get_auth_manager()
 
         self.word_filter = WordFilter()
         self.df = None
@@ -317,10 +319,10 @@ class MainWindow(QMainWindow):
 
         self.load_data()
 
-        if self.sync_enabled and self.sync_manager.is_sync_enabled():
-            run_in_thread(self._run_startup_sync)
-        elif self.sync_enabled:
-            self._update_sync_status_ui("error", tr("Sync enabled but not connected. Check settings."))
+        # Restore any saved account session off the UI thread (it may refresh
+        # tokens over the network), then sync if enabled. The app is fully usable
+        # locally while this runs; sign-in is never required to launch.
+        run_in_thread(self._restore_session_and_sync)
 
         # Prune expired entries from the local Bin (trash) once per launch.
         try:
@@ -2650,8 +2652,22 @@ class MainWindow(QMainWindow):
             self.nav_bin.setVisible(False)
             self._update_sync_status_ui("idle")
 
+    def _restore_session_and_sync(self):
+        """Worker-thread startup task: re-establish a stored account session,
+        then run the normal sync if enabled. Keeps the app local-only and fully
+        functional when there is no session."""
+        try:
+            self.auth.restore_session()
+        except Exception as exc:
+            logging.warning(f"Session restore failed: {exc}")
+        if self.sync_enabled:
+            self._run_startup_sync()
+
     def _run_startup_sync(self):
         try:
+            if not self.auth.is_logged_in():
+                self.sync_status_changed.emit("idle", tr("Sign in to sync (Settings → Sync)"))
+                return
             if not self.sync_manager.is_sync_enabled():
                 self.sync_status_changed.emit("error", tr("Not connected. Check internet or credentials"))
                 return

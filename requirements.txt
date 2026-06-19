@@ -28,6 +28,10 @@ supabase>=2.0.0
 # Environment Variables
 python-dotenv>=1.0.0
 
+# Secure credential storage (auth session tokens)
+keyring>=24.0.0          # OS keychain; falls back to an encrypted local file
+cryptography>=41.0.0     # encrypts the local session fallback when no keychain
+
 # System Integration
 keyboard>=0.13.5; sys_platform == "win32"
 pynput>=1.7.0

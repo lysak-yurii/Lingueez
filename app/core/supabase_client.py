@@ -30,19 +30,49 @@ import threading
 load_dotenv()
 
 
+# Central hosted Lingueez project. Shipped in source on purpose: the anon key is a
+# PUBLIC client key and Row-Level Security isolates each signed-in user's rows, so
+# it is safe to distribute. Advanced users can override both via .env / env vars
+# (SUPABASE_URL / SUPABASE_KEY) to point at their own project.
+DEFAULT_SUPABASE_URL = "https://dtyrmkynrideeknsdlrn.supabase.co"
+DEFAULT_SUPABASE_KEY ="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0eXJta3lucmlkZWVrbnNkbHJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4Njc1MTQsImV4cCI6MjA5NzQ0MzUxNH0.dds5SyMBN9u-0TUumB2nSCx68FJfpm3n63fLq1n9o10"
+
+
+def _client_options():
+    """Desktop-tuned client options. PKCE flow is required for the Google OAuth
+    loopback (``exchange_code_for_session``); session persistence is handled by
+    AuthManager via the OS keychain, not by gotrue's own storage."""
+    try:
+        from supabase import ClientOptions
+    except ImportError:  # older layout
+        from supabase.lib.client_options import ClientOptions
+    return ClientOptions(
+        flow_type="pkce",
+        auto_refresh_token=True,
+        persist_session=False,
+    )
+
+
 class SupabaseClient:
-    """Wrapper for Supabase client with methods for dictionary operations."""
-    
+    """Wrapper for Supabase client with methods for dictionary operations.
+
+    Holds an optional bearer token (the signed-in user's access token). Every
+    rebuild of the underlying client re-applies it, so Row-Level Security keeps
+    resolving ``auth.uid()`` to the logged-in user across credential changes.
+    """
+
     def __init__(self):
-        self.url = os.getenv('SUPABASE_URL')
-        self.key = os.getenv('SUPABASE_KEY')
+        self.url = os.getenv('SUPABASE_URL') or DEFAULT_SUPABASE_URL
+        self.key = os.getenv('SUPABASE_KEY') or DEFAULT_SUPABASE_KEY
         self.client: Optional[Client] = None
+        self._auth_token: Optional[str] = None
         self._connection_cache = {'result': None, 'timestamp': 0, 'lock': threading.Lock()}
         self._cache_duration = 2  # Cache successful connections for 2 seconds only
-        
+
         if self.url and self.key:
             try:
-                self.client = create_client(self.url, self.key)
+                self.client = create_client(self.url, self.key, options=_client_options())
+                self._apply_token()
                 logging.info("Supabase client initialized successfully")
             except Exception as e:
                 logging.error(f"Failed to initialize Supabase client: {e}")
@@ -54,12 +84,13 @@ class SupabaseClient:
         """Rebuild the client from the current environment (e.g. after the
         Supabase credentials change in Settings) and clear the connection cache,
         so an existing instance adopts new creds without an app restart."""
-        self.url = os.getenv('SUPABASE_URL')
-        self.key = os.getenv('SUPABASE_KEY')
+        self.url = os.getenv('SUPABASE_URL') or DEFAULT_SUPABASE_URL
+        self.key = os.getenv('SUPABASE_KEY') or DEFAULT_SUPABASE_KEY
         self.client = None
         if self.url and self.key:
             try:
-                self.client = create_client(self.url, self.key)
+                self.client = create_client(self.url, self.key, options=_client_options())
+                self._apply_token()
                 logging.info("Supabase client reconfigured")
             except Exception as e:
                 logging.error(f"Failed to reconfigure Supabase client: {e}")
@@ -67,6 +98,23 @@ class SupabaseClient:
         with self._connection_cache['lock']:
             self._connection_cache['result'] = None
             self._connection_cache['timestamp'] = 0
+
+    def set_auth_token(self, token: Optional[str]):
+        """Attach (or clear) the signed-in user's access token. Passing None
+        reverts PostgREST to the anonymous key. Stored so it survives a later
+        reconfigure()."""
+        self._auth_token = token
+        self._apply_token()
+
+    def _apply_token(self):
+        """Point PostgREST at the current token (user JWT, or anon key when
+        logged out) so RLS-scoped requests carry the right identity."""
+        if self.client is None:
+            return
+        try:
+            self.client.postgrest.auth(self._auth_token or self.key)
+        except Exception as e:
+            logging.warning(f"Could not apply auth token to PostgREST: {e}")
 
     def is_connected(self) -> bool:
         """Check if Supabase client is connected and can reach the server.
@@ -205,8 +253,11 @@ class SupabaseClient:
             'tag_name': 'tag_name',
             'word_id': 'word_id',
         }
-        # Local-only fields that should never be sent to Supabase
-        local_only_fields = {'cloud_id', 'Cloud_id', 'CLOUD_ID'}
+        # Local-only / server-owned fields that should never be sent to Supabase.
+        # user_id is stamped server-side by the `default auth.uid()` column (and
+        # the RLS `with check` policy rejects a mismatched value), so we never
+        # send it from the client even if a cloud read round-trips it back.
+        local_only_fields = {'cloud_id', 'Cloud_id', 'CLOUD_ID', 'user_id'}
         
         result = {}
         for key, value in data.items():
@@ -1307,4 +1358,28 @@ class SupabaseClient:
         except Exception as e:
             logging.error(f"Error permanently deleting text {text_id}: {e}")
             return False
+
+    def get_auth(self):
+        """Return the underlying gotrue auth client, or None if not configured."""
+        return self.client.auth if self.client is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Process-wide shared client.
+# ---------------------------------------------------------------------------
+# All cloud consumers (SyncManager, every DatabaseAdapter, the settings
+# connection test) go through this one instance, so a single set_auth_token() or
+# reconfigure() applies the user's identity everywhere at once — no code path can
+# end up using a tokenless client while another is authenticated.
+_shared_client: Optional['SupabaseClient'] = None
+_shared_lock = threading.Lock()
+
+
+def get_supabase() -> 'SupabaseClient':
+    """Return the process-wide shared SupabaseClient (created on first use)."""
+    global _shared_client
+    with _shared_lock:
+        if _shared_client is None:
+            _shared_client = SupabaseClient()
+        return _shared_client
 

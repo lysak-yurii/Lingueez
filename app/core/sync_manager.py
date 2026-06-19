@@ -20,10 +20,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 from app.core.database_adapter import DatabaseAdapter
-from app.core.supabase_client import SupabaseClient
+from app.core.supabase_client import get_supabase
+from app.core.auth_manager import get_auth_manager
 import sqlite3
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import logging
 import os
 import threading
@@ -32,9 +33,11 @@ import uuid
 
 class SyncManager:
     """Manages bidirectional sync between local SQLite and Supabase cloud database."""
-    
+
     def __init__(self):
-        self.supabase = SupabaseClient()
+        # Shared client + auth so a single signed-in token covers sync and CRUD.
+        self.supabase = get_supabase()
+        self.auth = get_auth_manager()
         self.local_db = 'dictionary.db'
         self.sync_metadata_file = '.last_sync'
         self.cleanup_metadata_file = '.last_cleanup'
@@ -64,9 +67,96 @@ class SyncManager:
             return 30
     
     def is_sync_enabled(self) -> bool:
-        """Check if sync is enabled and Supabase is available."""
+        """Sync requires a signed-in account AND a reachable Supabase.
+
+        The auth check is essential: with RLS on, an anonymous connectivity
+        probe returns an empty result (no error), so is_connected() alone would
+        report True while logged out and we'd "sync" nothing under no identity.
+        """
+        if not self.auth.is_logged_in():
+            return False
         return self.supabase.is_connected()
-    
+
+    # ---- account ownership of the local DB ----------------------------
+    def get_synced_account_id(self) -> Optional[str]:
+        """The user_id this local dictionary.db was last synced with."""
+        return self.db_adapter.get_sync_metadata('synced_account_id')
+
+    def set_synced_account_id(self, uid: Optional[str]):
+        self.db_adapter.set_sync_metadata('synced_account_id', uid or '')
+
+    def prepare_account(self, uid: str) -> str:
+        """Classify a login against the local DB's recorded owner:
+
+        'first'  — no previous owner (fresh/local-only DB) → safe to upload.
+        'same'   — same account as before → normal incremental sync.
+        'switch' — a *different* account → caller must archive + reset the local
+                   DB before syncing, so two accounts never merge.
+        """
+        prev = self.get_synced_account_id()
+        if not prev:
+            return 'first'
+        return 'same' if prev == uid else 'switch'
+
+    def archive_and_reset_local_db(self) -> bool:
+        """Back up the current dictionary.db (timestamped, into backups/) and
+        start a fresh empty one. Used when switching to a different account on a
+        machine that already holds someone else's data. Never deletes silently."""
+        import shutil
+        from app.core.db import initialize_database
+        try:
+            os.makedirs('backups', exist_ok=True)
+            if os.path.exists(self.local_db):
+                stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                archive = os.path.join('backups', f'dictionary_account_switch_{stamp}.db')
+                shutil.copy2(self.local_db, archive)
+                os.remove(self.local_db)
+                logging.info(f"Archived previous account's local DB to {archive}")
+            initialize_database()
+            return True
+        except Exception as exc:
+            logging.error(f"Could not archive/reset local DB on account switch: {exc}")
+            return False
+
+    def export_user_data(self, path: str) -> Tuple[bool, Optional[str]]:
+        """Write the signed-in account's cloud rows to a JSON file (GDPR data
+        portability). RLS scopes every select to the current user automatically."""
+        if not self.auth.is_logged_in():
+            return False, "Sign in first to export your account data."
+        client = self.supabase.client
+        if client is None:
+            return False, "Not connected to the cloud."
+        try:
+            import json
+            payload = {
+                'account': self.auth.current_user(),
+                'exported_at': datetime.now(timezone.utc).isoformat(),
+                'data': {},
+            }
+            for table in ('words', 'texts', 'tags', 'word_tags'):
+                payload['data'][table] = client.table(table).select('*').execute().data
+            with open(path, 'w', encoding='utf-8') as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+
+    def delete_account(self) -> Tuple[bool, Optional[str]]:
+        """Call the server-side delete_account() RPC (removes the auth user and,
+        via on-delete-cascade, every row they own), then sign out locally."""
+        if not self.auth.is_logged_in():
+            return False, "Sign in first."
+        client = self.supabase.client
+        if client is None:
+            return False, "Not connected to the cloud."
+        try:
+            client.rpc('delete_account').execute()
+        except Exception as exc:
+            return False, (f"Could not delete the account ({exc}). Make sure the "
+                           f"latest schema (with delete_account()) has been applied.")
+        self.auth.sign_out()
+        return True, None
+
     def get_sync_status(self) -> Dict[str, Any]:
         """Get current sync status information."""
         status = {
@@ -80,10 +170,15 @@ class SyncManager:
     
     def sync_on_startup(self):
         """Sync when app starts. Enhanced sync with deletion tracking and conflict resolution."""
+        if not self.auth.is_logged_in():
+            logging.info("Not signed in — staying local-only, skipping sync")
+            return
+        # Refresh the access token first; a stale one would 401 every call below.
+        self.auth.refresh_if_needed()
         if not self.is_sync_enabled():
             logging.warning("Supabase not connected, skipping sync")
             return
-        
+
         # Test actual connectivity before proceeding (not just client existence)
         # CRITICAL: We must verify we can actually reach Supabase, not just that client exists
         # If internet is off, Supabase queries will fail, and we should abort sync
@@ -240,7 +335,11 @@ class SyncManager:
             # Mark that sync has been performed at least once (only if successful)
             if sync_successful:
                 self.db_adapter.set_sync_metadata('first_sync_completed', 'true')
-                
+                # Record which account this local DB now belongs to, so a later
+                # login as a different user can detect the mismatch (see
+                # prepare_account) instead of cross-contaminating data.
+                self.set_synced_account_id(self.auth.current_user_id())
+
                 # Validate sync
                 validation_result = self._validate_sync()
                 if not validation_result:
