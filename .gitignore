@@ -26,8 +26,9 @@ window_geometry.json
 # Generated assets (written at startup)
 assets/generated/
 
-# User data
+# User data (local-only store + one SQLite file per signed-in account)
 dictionary.db
+dictionary_*.db
 backups/
 
 # Build artifacts

@@ -220,6 +220,9 @@ class MainWindow(QMainWindow):
     hotkey_pressed = Signal()
     reload_requested = Signal()
     translation_fallback = Signal(str)
+    # Marshals an account switch onto the GUI thread (the startup session restore
+    # runs on a worker). Payload is the user_id, or None for the local-only store.
+    account_switch_requested = Signal(object)
 
     def __init__(self, settings, start_hidden=False):
         super().__init__()
@@ -290,6 +293,7 @@ class MainWindow(QMainWindow):
         self.sync_popover = None  # built lazily on first cloud-icon click
         self.hotkey_pressed.connect(self.open_add_word_and_translate)
         self.reload_requested.connect(self.load_data)
+        self.account_switch_requested.connect(self.switch_active_account)
         # Surface DeepL->Google fallbacks (raised on worker threads) as a toast.
         self.translation_fallback.connect(
             lambda msg: show_toast(self, tr("Translation"), msg, "info"))
@@ -2653,15 +2657,86 @@ class MainWindow(QMainWindow):
             self._update_sync_status_ui("idle")
 
     def _restore_session_and_sync(self):
-        """Worker-thread startup task: re-establish a stored account session,
-        then run the normal sync if enabled. Keeps the app local-only and fully
-        functional when there is no session."""
+        """Worker-thread startup task: re-establish a stored account session, then
+        point the app at that account's local DB and sync. Stays on the local-only
+        ``dictionary.db`` and fully functional when there is no session."""
         try:
             self.auth.restore_session()
         except Exception as exc:
             logging.warning(f"Session restore failed: {exc}")
+        uid = self.auth.current_user_id() if self.auth.is_logged_in() else None
+        # Marshal onto the GUI thread: switch_active_account touches widgets
+        # (reload, possible adoption prompt) and the shared adapters.
+        self.account_switch_requested.emit(uid)
+
+    def _local_db_has_data(self, path) -> bool:
+        """True if the given SQLite file holds any words or texts."""
+        import sqlite3
+        if not os.path.exists(path):
+            return False
+        try:
+            conn = sqlite3.connect(path)
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT EXISTS(SELECT 1 FROM words) OR EXISTS(SELECT 1 FROM texts)")
+                return bool(cur.fetchone()[0])
+            finally:
+                conn.close()
+        except Exception:
+            return False
+
+    def switch_active_account(self, uid):
+        """Point the whole app at the local DB for ``uid`` (or the local-only
+        ``dictionary.db`` when uid is None), reload the UI, and sync. Each account
+        gets its own SQLite file so words and sync state never cross accounts.
+
+        On the *first* sign-in after using the app locally, offers to adopt the
+        current local-only words into the new account (otherwise the account
+        starts empty and pulls its cloud data)."""
+        from app.core.db import (account_db_path, get_active_db_path,
+                                  set_active_db_path, initialize_database, DB_PATH)
+        target = account_db_path(uid)
+        prev = get_active_db_path()
+        if target == prev:
+            # Already on this file (e.g. opening the account dialog while signed
+            # in). Just make sure a sync runs.
+            if self.sync_enabled:
+                run_in_thread(self._run_startup_sync)
+            return
+
+        # First sign-in adoption: only when leaving the local-only store for a
+        # brand-new account file that doesn't exist yet, and there's local data.
+        if (uid and prev == DB_PATH and not os.path.exists(target)
+                and self._local_db_has_data(prev)):
+            adopt = QMessageBox.question(
+                self, tr("Upload local words?"),
+                tr("Upload your current local words to this account? They'll become "
+                   "this account's data and sync to the cloud.\n\nChoose No to start "
+                   "this account empty and load its cloud data instead."),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
+            if adopt:
+                try:
+                    import shutil
+                    os.makedirs('backups', exist_ok=True)
+                    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    shutil.copy2(prev, os.path.join('backups', f'dictionary_adopted_{stamp}.db'))
+                    shutil.move(prev, target)
+                except Exception as exc:
+                    logging.error(f"Could not adopt local DB into account: {exc}")
+                    initialize_database(target)
+            else:
+                initialize_database(target)
+
+        if not os.path.exists(target):
+            initialize_database(target)
+
+        # Repoint every data-layer holder, then refresh the UI from the new file.
+        set_active_db_path(target)
+        self.db_adapter.set_local_db(target)
+        self.sync_manager.set_local_db(target)
+        self.reload_requested.emit()
         if self.sync_enabled:
-            self._run_startup_sync()
+            run_in_thread(self._run_startup_sync)
 
     def _run_startup_sync(self):
         try:

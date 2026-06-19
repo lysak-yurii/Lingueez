@@ -790,14 +790,29 @@ class SettingsDialog(FramelessDialog):
                     pass
         dlg = AccountDialog(self, auth=get_auth_manager())
         dlg.authenticated.connect(self._refresh_account_ui)
+        self._account_changed = False
+        dlg.authenticated.connect(lambda: setattr(self, "_account_changed", True))
         dlg.exec()
         self._refresh_account_ui()
+        # A successful sign-in: hand off to the main window to switch to this
+        # account's local DB (with first-time adoption prompt) and sync. Done
+        # after the dialog closes so any adoption prompt isn't stacked on it.
+        if self._account_changed:
+            mw = self.parent()
+            if mw is not None and hasattr(mw, "switch_active_account"):
+                mw.switch_active_account(get_auth_manager().current_user_id())
 
     def _sign_out(self):
         ok, msg = get_auth_manager().sign_out()
         self._refresh_account_ui()
         show_toast(self, tr("Account"), msg or tr("Signed out."),
                    "success" if ok else "error")
+        # Return to the local-only dictionary.db (the account's file is left on
+        # disk untouched for next sign-in).
+        if ok:
+            mw = self.parent()
+            if mw is not None and hasattr(mw, "switch_active_account"):
+                mw.switch_active_account(None)
 
     def _export_account_data(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -828,12 +843,16 @@ class SettingsDialog(FramelessDialog):
         def done(result):
             ok, err = result
             if ok:
-                # Archive the local DB so the now-orphaned data isn't left behind.
+                # Archive the deleted account's local DB so the now-orphaned data
+                # isn't left behind, then return to the local-only store.
                 try:
                     self._sync_manager().archive_and_reset_local_db()
                 except Exception:
                     pass
                 self._refresh_account_ui()
+                mw = self.parent()
+                if mw is not None and hasattr(mw, "switch_active_account"):
+                    mw.switch_active_account(None)
                 show_toast(self, tr("Account"), tr("Account deleted."), "success", 6000)
             else:
                 show_toast(self, tr("Account"), err or tr("Could not delete the account."),

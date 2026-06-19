@@ -29,6 +29,28 @@ import sqlite3
 
 DB_PATH = 'dictionary.db'
 
+# Active local database. The app keeps one SQLite file per account
+# (``dictionary_<uid>.db``) plus the logged-out, local-only ``dictionary.db``.
+# Switching accounts repoints this so each account's words, sync queues and
+# sync_metadata stay isolated. Helpers below resolve the path at *call time*
+# (a ``db_path=DB_PATH`` default would bind once at import and never follow a
+# switch), so bare callers automatically hit the active account's file.
+_active_db_path = DB_PATH
+
+
+def get_active_db_path() -> str:
+    return _active_db_path
+
+
+def set_active_db_path(path: str) -> None:
+    global _active_db_path
+    _active_db_path = path or DB_PATH
+
+
+def account_db_path(uid) -> str:
+    """Local DB filename for an account id; the local-only file when uid is falsy."""
+    return DB_PATH if not uid else f'dictionary_{uid}.db'
+
 
 def _ensure_column(cursor, table, column, decl):
     """Additive migration: add a column to pre-existing databases."""
@@ -38,7 +60,8 @@ def _ensure_column(cursor, table, column, decl):
         logging.info("Added column %s.%s", table, column)
 
 
-def initialize_database(db_path=DB_PATH):
+def initialize_database(db_path=None):
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
@@ -60,6 +83,12 @@ def initialize_database(db_path=DB_PATH):
             UNIQUE(Word1, Word2)
         )
     ''')
+
+    # cloud_id maps a local word to its Supabase row id; the pull and direct-CRUD
+    # code store and match on it. Older local DBs predate this column, and a fresh
+    # one above doesn't declare it — add it additively, or EVERY pulled word fails
+    # with "no such column: cloud_id" while sync still reports success.
+    _ensure_column(cursor, 'words', 'cloud_id', 'INTEGER')
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS texts (
@@ -158,7 +187,8 @@ def initialize_database(db_path=DB_PATH):
     logging.info("Database initialized successfully.")
 
 
-def get_all_tags(db_path=DB_PATH):
+def get_all_tags(db_path=None):
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT tag_name FROM tags ORDER BY tag_name COLLATE NOCASE")
@@ -167,7 +197,8 @@ def get_all_tags(db_path=DB_PATH):
     return tags
 
 
-def get_tags_for_word(word_id, db_path=DB_PATH):
+def get_tags_for_word(word_id, db_path=None):
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
@@ -181,7 +212,8 @@ def get_tags_for_word(word_id, db_path=DB_PATH):
     return tags
 
 
-def get_word_ids_for_tag(tag_name, db_path=DB_PATH):
+def get_word_ids_for_tag(tag_name, db_path=None):
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
@@ -194,7 +226,8 @@ def get_word_ids_for_tag(tag_name, db_path=DB_PATH):
     return ids
 
 
-def get_word_ids_matching_tag_query(query, db_path=DB_PATH):
+def get_word_ids_matching_tag_query(query, db_path=None):
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
@@ -207,8 +240,9 @@ def get_word_ids_matching_tag_query(query, db_path=DB_PATH):
     return ids
 
 
-def get_tag_usage_counts(db_path=DB_PATH):
+def get_tag_usage_counts(db_path=None):
     """Return {tag_name: usage_count} across all words."""
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
@@ -221,9 +255,10 @@ def get_tag_usage_counts(db_path=DB_PATH):
     return counts
 
 
-def get_definition_counts(db_path=DB_PATH):
+def get_definition_counts(db_path=None):
     """Return (filled, total) where filled counts words with a non-empty
     primary Definition. Used by the statistics dashboard."""
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('''
@@ -242,8 +277,9 @@ def get_definition_counts(db_path=DB_PATH):
 # Review history (local-only). Each fully-listened word logs one event.
 # --------------------------------------------------------------------------- #
 
-def log_review(word_id, played_at_iso=None, db_path=DB_PATH):
+def log_review(word_id, played_at_iso=None, db_path=None):
     """Append one review event for a word (one completed listen)."""
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     if played_at_iso:
@@ -255,8 +291,9 @@ def log_review(word_id, played_at_iso=None, db_path=DB_PATH):
     conn.close()
 
 
-def get_play_count(word_id, db_path=DB_PATH):
+def get_play_count(word_id, db_path=None):
     """Total completed listens recorded for a word."""
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('SELECT COUNT(*) FROM review_events WHERE word_id = ?', (int(word_id),))
@@ -265,7 +302,7 @@ def get_play_count(word_id, db_path=DB_PATH):
     return int(n or 0)
 
 
-def get_review_aggregates(top=8, db_path=DB_PATH):
+def get_review_aggregates(top=8, db_path=None):
     """Aggregates for the statistics dashboard.
 
     Returns ``{"daily": [(YYYY-MM-DD, count), ...] ascending, "total": int,
@@ -273,6 +310,7 @@ def get_review_aggregates(top=8, db_path=DB_PATH):
     (word deleted) are skipped from ``most_reviewed`` but still counted in the
     daily totals and ``total``.
     """
+    db_path = db_path or get_active_db_path()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 

@@ -31,6 +31,12 @@ import threading
 import uuid
 
 
+class SyncError(Exception):
+    """A sync that fetched fine but failed to write some/all records locally.
+    Distinct from RuntimeError (which the UI treats as a benign shutdown) so a
+    real data-integrity failure surfaces instead of masquerading as success."""
+
+
 class SyncManager:
     """Manages bidirectional sync between local SQLite and Supabase cloud database."""
 
@@ -38,7 +44,8 @@ class SyncManager:
         # Shared client + auth so a single signed-in token covers sync and CRUD.
         self.supabase = get_supabase()
         self.auth = get_auth_manager()
-        self.local_db = 'dictionary.db'
+        from app.core.db import get_active_db_path
+        self.local_db = get_active_db_path()
         self.sync_metadata_file = '.last_sync'
         self.cleanup_metadata_file = '.last_cleanup'
         self.db_adapter = DatabaseAdapter(use_cloud=False)  # Use adapter for queue access
@@ -66,6 +73,12 @@ class SyncManager:
             logging.warning(f"Error loading cleanup grace period from settings: {e}, using default 30 days")
             return 30
     
+    def set_local_db(self, path: str):
+        """Repoint sync at a different local SQLite file (account switch). Updates
+        both this manager and its internal queue-access adapter."""
+        self.local_db = path
+        self.db_adapter.set_local_db(path)
+
     def is_sync_enabled(self) -> bool:
         """Sync requires a signed-in account AND a reachable Supabase.
 
@@ -219,7 +232,13 @@ class SyncManager:
         sync_successful = False
         try:
             logging.info("Starting enhanced sync on startup...")
-            
+
+            # The active DB file may have been deleted (or recreated empty by a
+            # bare sqlite connect) since startup; ensure its tables exist before we
+            # read local data, or the initial pull aborts with "no such table".
+            from app.core.db import initialize_database
+            initialize_database(self.local_db)
+
             # Check if this is first-time sync
             is_first_sync = self._is_first_sync()
             
@@ -349,11 +368,18 @@ class SyncManager:
             else:
                 logging.warning("Sync did not complete successfully - metadata not updated")
             
+        except SyncError:
+            # Records couldn't be saved locally — a real data-integrity failure.
+            # Surface it: metadata stays unstamped and _run_startup_sync reports an
+            # error rather than a false "Sync completed".
+            logging.error("Sync incomplete — some records failed to save locally",
+                          exc_info=True)
+            raise
         except Exception as e:
             logging.error(f"Sync failed: {e}", exc_info=True)
             sync_successful = False
-            # Continue with local database - don't crash the app
-            # But don't update sync metadata or claim success
+            # Local-first: a transient error (e.g. a network drop mid-sync) shouldn't
+            # crash the app or alarm the user; the next sync retries.
         finally:
             # Always release sync lock
             self.db_adapter.release_sync_lock()
@@ -2189,7 +2215,10 @@ class SyncManager:
         
         conn = sqlite3.connect(self.local_db)
         cursor = conn.cursor()
-        
+        failures = 0  # words/texts that errored on write; a nonzero count must not
+                      # be reported as a clean sync — this is exactly what hid the
+                      # missing-cloud_id bug (every word failed yet sync "succeeded").
+
         try:
             # Verify tables exist (they should, but check to be safe)
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('words', 'texts', 'tags', 'word_tags')")
@@ -2267,8 +2296,9 @@ class SyncManager:
                         words_inserted += 1
                     self._sync_word_to_local(cursor, word)
                 except Exception as e:
+                    failures += 1
                     logging.error(f"Failed to pull word ID {word.get('ID') or word.get('id')}: {e}")
-            
+
             logging.info(f"Words: {words_inserted} inserted, {words_updated} updated")
             
             # Pull texts
@@ -2285,8 +2315,9 @@ class SyncManager:
                         texts_inserted += 1
                     self._sync_text_to_local(cursor, text)
                 except Exception as e:
+                    failures += 1
                     logging.error(f"Failed to pull text ID {text.get('ID') or text.get('id')}: {e}")
-            
+
             logging.info(f"Texts: {texts_inserted} inserted, {texts_updated} updated")
             
             # Pull word_tags (update tag_ids using mapping)
@@ -2352,7 +2383,16 @@ class SyncManager:
             raise
         finally:
             conn.close()
-    
+
+        # Per-record failures above were only logged. If any occurred, the pull did
+        # NOT fully succeed — raise so the caller leaves first_sync_completed/last_sync
+        # unstamped and the UI reports an error instead of "Sync completed" over a
+        # silent data loss (how the missing cloud_id column went unnoticed).
+        if failures:
+            raise SyncError(
+                f"{failures} record(s) could not be saved to the local database "
+                f"during the cloud pull — see the log for the failing rows.")
+
     def _merge_sync(self, local_words, local_texts, local_tags, local_word_tags,
                    cloud_words, cloud_texts, cloud_tags, cloud_word_tags):
         """Merge data from both sides, handling conflicts.

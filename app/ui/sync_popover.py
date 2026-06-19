@@ -237,6 +237,10 @@ class SyncPopover(QFrame):
         if not info.get("first_sync_completed"):
             self.note_label.setText(tr("Initial sync has not completed yet."))
             self.note_label.setVisible(True)
+        else:
+            # The popover is a cached singleton; without this the note would
+            # stick forever once shown, even after a successful sync.
+            self.note_label.setVisible(False)
         self._resize_to_content()
 
     def _show_error(self, message):

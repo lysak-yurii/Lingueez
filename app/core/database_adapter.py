@@ -42,7 +42,8 @@ class DatabaseAdapter:
             use_cloud: If True, attempt to use Supabase. Falls back to SQLite if unavailable.
         """
         self.use_cloud = use_cloud
-        self.local_db = 'dictionary.db'
+        from app.core.db import get_active_db_path
+        self.local_db = get_active_db_path()
         # Share the process-wide client so the signed-in token (set by
         # AuthManager) applies to direct CRUD here, not just to SyncManager.
         self.supabase = get_supabase() if use_cloud else None
@@ -54,6 +55,13 @@ class DatabaseAdapter:
         # Ensure sync tables exist
         self._ensure_sync_tables()
     
+    def set_local_db(self, path: str):
+        """Repoint at a different local SQLite file (account switch). Pages and
+        dialogs hold this instance, so we mutate in place rather than rebuild.
+        Connections are opened per-call, so there is no cached handle to close."""
+        self.local_db = path
+        self._ensure_sync_tables()
+
     def _use_cloud(self) -> bool:
         """Check if cloud should be used for this operation."""
         return self.use_cloud and self.cloud_available
