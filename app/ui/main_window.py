@@ -64,7 +64,7 @@ from app.ui.texts_page import TextsPage
 from app.ui.stats_page import StatsPage
 from app.ui.toast import show_toast
 from app.ui.widgets import (ContentComboBox, ElidedLabel, OverflowToolBar,
-                            SearchField, clamp_combo_popup_onscreen)
+                            SearchField, clamp_combo_popup_onscreen, style_as_link)
 from app.ui.word_model import (
     COL_ID, COL_CREATED, COL_LANG1, COL_LANG2, COL_ROWNUM, COL_SOURCE, COL_STATUS,
     COL_WORD1, COL_WORD2, HEADERS, WordFilter, WordTableModel, words_to_dataframe,
@@ -1933,10 +1933,9 @@ class MainWindow(QMainWindow):
 
         def link_button(slot):
             b = QPushButton()
-            b.setCursor(Qt.PointingHandCursor)
             b.setFlat(True)
             b.clicked.connect(slot)
-            return b
+            return style_as_link(b)
 
         self._empty_import_btn = link_button(self.import_excel)
         self._empty_dot = QLabel("·", objectName="dimLabel")
@@ -2000,11 +1999,15 @@ class MainWindow(QMainWindow):
         self._empty_anim.start()
 
     def _style_empty_links(self):
-        css = (f"QPushButton {{ color: {self.colors['text_dim']}; border: none;"
-               f" background: transparent; padding: 2px 4px; }}"
-               f"QPushButton:hover {{ color: {self.colors['accent']}; }}")
-        for b in self._empty_links:
-            b.setStyleSheet(css)
+        # Accent text that reads as a link, with a prominent accent-tinted pill on hover.
+        acc = self.colors['accent']
+        r, g, b = int(acc[1:3], 16), int(acc[3:5], 16), int(acc[5:7], 16)
+        css = (f"QPushButton {{ color: {acc}; border: none; background: transparent;"
+               f" padding: 5px 12px; border-radius: 7px; }}"
+               f"QPushButton:hover {{ color: {self.colors['accent_hover']};"
+               f" background: rgba({r}, {g}, {b}, 0.16); }}")
+        for btn in self._empty_links:
+            btn.setStyleSheet(css)
 
     def _clear_word_filters(self):
         """Reset search + filters, then refresh once."""
@@ -3122,15 +3125,29 @@ class MainWindow(QMainWindow):
         self.show_window()
         self.open_settings()
 
+    # Settings that change the live look of the app — the only ones that need the
+    # (expensive) full-app restyle when they change.
+    _APPEARANCE_KEYS = ("appearance_mode", "widget_scaling", "table_density")
+
     def open_settings(self):
         from app.ui.dialogs.settings_dialog import SettingsDialog
+        before = {k: self.settings.get(k) for k in self._APPEARANCE_KEYS}
         dialog = SettingsDialog(self)
         if dialog.exec():
             self.settings = load_settings()
-            # Mask the (unavoidable) full-app restyle behind a frozen snapshot,
-            # then crossfade to the new theme so it reads as a smooth dissolve
-            # rather than a ~2s freeze.
-            crossfade_during(self, self._apply_appearance)
+            # A server connect/disconnect closes the dialog without saving any other
+            # settings, so skip the expensive full-app restyle and the "saved" toast —
+            # just re-apply sync. Keeps the switch snappy.
+            if getattr(dialog, "_server_switch_only", False):
+                self._reapply_sync()
+                return
+            # Only restyle when an appearance setting actually changed — otherwise the
+            # full-app theme re-apply (a ~2s freeze) runs needlessly on every save.
+            if {k: self.settings.get(k) for k in self._APPEARANCE_KEYS} != before:
+                # Mask the unavoidable restyle behind a frozen snapshot with an
+                # "Applying…" card, then crossfade so it reads as a smooth dissolve.
+                crossfade_during(self, self._apply_appearance,
+                                 message=tr("Applying theme…"))
             self._apply_global_hotkey()
             self._reapply_sync()
             show_toast(self, tr("Settings"), tr("Settings saved."), "success")

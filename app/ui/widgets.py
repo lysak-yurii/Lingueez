@@ -35,6 +35,14 @@ from app.i18n import tr
 from app.ui import icons
 
 
+def style_as_link(button):
+    """Make a flat QPushButton read as a clickable text link: pointing-hand cursor
+    (colour is left to the caller's stylesheet so it can track the theme, with a
+    brighter accent on hover). Returns the button for chaining."""
+    button.setCursor(Qt.PointingHandCursor)
+    return button
+
+
 class SearchField(QWidget):
     """Search input that, in compact mode, collapses to a round icon button and
     expands rightward into a full field (animated) when clicked — the pattern

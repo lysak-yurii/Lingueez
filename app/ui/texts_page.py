@@ -55,7 +55,8 @@ from app.ui.dialogs.base import ask_item
 from app.ui.dialogs.definition import markup_to_html
 from app.ui.reader import ReaderPlayer, ReaderToolbar, _sentence_spans
 from app.ui.toast import show_toast
-from app.ui.widgets import ContentComboBox, ElidedLabel, FlowLayout, OverflowToolBar
+from app.ui.widgets import (ContentComboBox, ElidedLabel, FlowLayout,
+                            OverflowToolBar, style_as_link)
 from app.ui.word_popup import WordPopup
 from app.ui.workers import run_in_thread
 
@@ -545,10 +546,9 @@ class TextsPage(QWidget):
 
         def link_button(text, slot):
             b = QPushButton(text)
-            b.setCursor(Qt.PointingHandCursor)
             b.setFlat(True)
             b.clicked.connect(slot)
-            return b
+            return style_as_link(b)
 
         self._tempty_fetch = link_button(tr("Fetch from the Internet"),
                                          lambda: self._open_add_dialog(1))
@@ -575,11 +575,15 @@ class TextsPage(QWidget):
         return page
 
     def _style_tempty_links(self):
-        css = (f"QPushButton {{ color: {self._colors['text_dim']}; border: none;"
-               f" background: transparent; padding: 2px 4px; }}"
-               f"QPushButton:hover {{ color: {self._colors['accent']}; }}")
-        for b in self._tempty_links:
-            b.setStyleSheet(css)
+        # Accent text that reads as a link, with a prominent accent-tinted pill on hover.
+        acc = self._colors['accent']
+        r, g, b = int(acc[1:3], 16), int(acc[3:5], 16), int(acc[5:7], 16)
+        css = (f"QPushButton {{ color: {acc}; border: none; background: transparent;"
+               f" padding: 5px 12px; border-radius: 7px; }}"
+               f"QPushButton:hover {{ color: {self._colors['accent_hover']};"
+               f" background: rgba({r}, {g}, {b}, 0.16); }}")
+        for btn in self._tempty_links:
+            btn.setStyleSheet(css)
 
     def refresh_theme(self, colors):
         """Re-tint icons and delegate colors after a theme change."""

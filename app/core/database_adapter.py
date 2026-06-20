@@ -48,11 +48,12 @@ class DatabaseAdapter:
         # Share the process-wide client so the signed-in token (set by
         # AuthManager) applies to direct CRUD here, not just to SyncManager.
         self.supabase = get_supabase() if use_cloud else None
-        self.cloud_available = self.supabase.is_connected() if self.supabase else False
-        
-        if use_cloud and not self.cloud_available:
-            logging.warning("Supabase not available, using local SQLite only")
-        
+        # Assume reachable when cloud is on; probing here would do a blocking network
+        # call on the GUI thread. Actual reachability is confirmed by the (threaded)
+        # startup sync, which flips the cloud-status chrome. Cloud CRUD already falls
+        # back to the local queue when a request fails, so an optimistic flag is safe.
+        self.cloud_available = bool(use_cloud and self.supabase)
+
         # Ensure sync tables exist
         self._ensure_sync_tables()
     
@@ -78,7 +79,10 @@ class DatabaseAdapter:
                 self.supabase = get_supabase()
             else:
                 self.supabase.reconfigure()
-        self.cloud_available = self.supabase.is_connected() if self.supabase else False
+        # Optimistic — do NOT probe is_connected() here: it's a blocking network call
+        # and this runs on the GUI thread during account/server switches. The threaded
+        # sync confirms real reachability; failed cloud writes fall back to the queue.
+        self.cloud_available = bool(enabled and self.supabase)
     
     def _ensure_sync_tables(self):
         """Ensure sync tracking tables exist in the database."""

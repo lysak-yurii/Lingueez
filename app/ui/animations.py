@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 
-def crossfade_during(widget, work, duration=260):
+def crossfade_during(widget, work, duration=260, message=None):
     """Mask a blocking restyle behind a snapshot, then crossfade to the result.
 
     Grabs `widget` as it looks now and holds that frozen image on top while
@@ -41,6 +41,11 @@ def crossfade_during(widget, work, duration=260):
     `setStyleSheet()` — then fades the stale snapshot out to reveal the freshly
     styled widget underneath. The user sees a clean old→new dissolve instead of
     a half-painted window locking up.
+
+    `message` (optional): show a dimmed "working" card with this text over the
+    snapshot before `work()` blocks. The card can't animate while the GUI thread
+    is busy (all painting is on this thread), but it makes the unavoidable pause
+    read as deliberate "Applying…" rather than a frozen window.
     """
     if not widget.isVisible():
         work()
@@ -51,8 +56,26 @@ def crossfade_during(widget, work, duration=260):
     snap.setGeometry(widget.rect())
     snap.show()
     snap.raise_()
-    # Flush once so the snapshot is actually on screen before work() blocks
-    # the event loop; otherwise the freeze shows through.
+
+    if message:
+        dim = QWidget(snap)
+        dim.setGeometry(snap.rect())
+        dim.setStyleSheet("background: rgba(0, 0, 0, 110);")
+        dim.show()
+        card = QLabel(message, snap)
+        card.setAlignment(Qt.AlignCenter)
+        card.setStyleSheet(
+            "color: white; background: rgba(28, 28, 30, 235); padding: 16px 26px;"
+            "border-radius: 12px; font-size: 14px; font-weight: 600;")
+        card.adjustSize()
+        card.move((snap.width() - card.width()) // 2,
+                  (snap.height() - card.height()) // 2)
+        card.show()
+        card.raise_()
+
+    # Flush once so the snapshot (and the "Applying…" card) is actually on screen
+    # before work() blocks the event loop; otherwise the freeze shows through.
+    QApplication.processEvents()
     QApplication.processEvents()
 
     work()

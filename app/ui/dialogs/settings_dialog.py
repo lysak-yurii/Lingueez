@@ -650,18 +650,19 @@ class SettingsDialog(FramelessDialog):
             g.addRow(tr("Supabase key (anon)"), self.supabase_key_edit)
 
             btn_row = QHBoxLayout()
-            test_btn = QPushButton(tr("Test Connection"))
-            test_btn.clicked.connect(self._test_supabase)
-            btn_row.addWidget(test_btn)
+            self.test_btn = QPushButton(tr("Test Connection"))
+            self.test_btn.clicked.connect(self._test_supabase)
+            btn_row.addWidget(self.test_btn)
+            self.use_server_btn = None
             if custom_mode:
                 disconnect_btn = QPushButton(tr("Disconnect — use the built-in server"),
                                              objectName="dangerButton")
                 disconnect_btn.clicked.connect(self._disconnect_custom_server)
                 btn_row.addWidget(disconnect_btn)
             else:
-                use_btn = QPushButton(tr("Use this server"), objectName="primaryButton")
-                use_btn.clicked.connect(self._use_custom_server)
-                btn_row.addWidget(use_btn)
+                self.use_server_btn = QPushButton(tr("Use this server"), objectName="primaryButton")
+                self.use_server_btn.clicked.connect(self._use_custom_server)
+                btn_row.addWidget(self.use_server_btn)
             btn_row.addStretch(1)
             g.addRow(btn_row)
 
@@ -849,21 +850,38 @@ class SettingsDialog(FramelessDialog):
             QMessageBox.warning(self, "Supabase",
                                 tr("Enter your server's URL and anon key first."))
             return
-        # Verify the creds actually connect before switching to them. If they don't,
-        # warn but still let the user proceed (e.g. they're offline right now but know
-        # the details are correct).
+        # Verify the creds actually connect before switching — on a worker thread, so
+        # a slow/unreachable server can't freeze the UI. Re-enable the button if the
+        # user backs out.
         from app.core.supabase_client import probe_credentials
-        ok, err = probe_credentials(url, key)
-        if not ok:
-            detail = (tr("Could not connect to this server:\n{error}").format(error=err)
-                      if err else tr("Could not connect to this server."))
-            proceed = QMessageBox.warning(
-                self, "Supabase",
-                tr("{detail}\n\nCheck the URL and anon key, and that you've run the "
-                   "schema SQL there. Use these details anyway?").format(detail=detail),
-                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
-            if proceed != QMessageBox.Yes:
-                return
+        self._set_server_busy(True)
+
+        def done(result):
+            ok, err = result
+            self._set_server_busy(False)
+            if not ok:
+                detail = (tr("Could not connect to this server:\n{error}").format(error=err)
+                          if err else tr("Could not connect to this server."))
+                proceed = QMessageBox.warning(
+                    self, "Supabase",
+                    tr("{detail}\n\nCheck the URL and anon key, and that you've run the "
+                       "schema SQL there. Use these details anyway?").format(detail=detail),
+                    QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+                if proceed != QMessageBox.Yes:
+                    return
+            self._activate_custom_server(url, key)
+
+        run_in_thread(lambda: probe_credentials(url, key), on_result=done,
+                      on_error=lambda e: done((False, str(e))))
+
+    def _set_server_busy(self, busy):
+        for b in (getattr(self, "test_btn", None), getattr(self, "use_server_btn", None)):
+            if b is not None:
+                b.setEnabled(not busy)
+        if getattr(self, "use_server_btn", None) is not None:
+            self.use_server_btn.setText(tr("Connecting…") if busy else tr("Use this server"))
+
+    def _activate_custom_server(self, url, key):
         _write_env({"SUPABASE_URL": url, "SUPABASE_KEY": key,
                     "CUSTOM_SUPABASE_URL": url, "CUSTOM_SUPABASE_KEY": key})
         try:
@@ -872,6 +890,9 @@ class SettingsDialog(FramelessDialog):
         except Exception:
             pass
         show_toast(self, tr("Sync"), tr("Now syncing with your own server."), "success")
+        # Server-only close: skip the full settings save + app restyle (nothing visual
+        # changed) so the switch is snappy — see MainWindow.open_settings.
+        self._server_switch_only = True
         self.accept()
 
     def _disconnect_custom_server(self):
@@ -901,6 +922,8 @@ class SettingsDialog(FramelessDialog):
         except Exception:
             pass
         show_toast(self, tr("Sync"), tr("Disconnected — using the built-in server."), "info")
+        # Server-only close: skip the full settings save + app restyle so it's snappy.
+        self._server_switch_only = True
         # Close Settings so the main window re-applies sync (back to built-in,
         # local-only) and the tab rebuilds cleanly on next open.
         self.accept()
@@ -916,15 +939,25 @@ class SettingsDialog(FramelessDialog):
             QMessageBox.warning(self, "Supabase",
                                 tr("Enter your server's URL and anon key first, then test."))
             return
+        # Probe on a worker thread so a slow/unreachable server doesn't freeze the UI.
         from app.core.supabase_client import probe_credentials
-        ok, err = probe_credentials(url, key)
-        if ok:
-            QMessageBox.information(self, "Supabase", tr("Connection successful! ✅"))
-        elif err:
-            QMessageBox.critical(self, "Supabase", tr("Connection test failed:\n{error}").format(error=err))
-        else:
-            QMessageBox.warning(self, "Supabase",
-                                tr("Could not connect. Check the URL/key and your internet connection."))
+        self._set_server_busy(True)
+        self.test_btn.setText(tr("Testing…"))
+
+        def done(result):
+            ok, err = result
+            self._set_server_busy(False)
+            self.test_btn.setText(tr("Test Connection"))
+            if ok:
+                QMessageBox.information(self, "Supabase", tr("Connection successful! ✅"))
+            elif err:
+                QMessageBox.critical(self, "Supabase", tr("Connection test failed:\n{error}").format(error=err))
+            else:
+                QMessageBox.warning(self, "Supabase",
+                                    tr("Could not connect. Check the URL/key and your internet connection."))
+
+        run_in_thread(lambda: probe_credentials(url, key), on_result=done,
+                      on_error=lambda e: done((False, str(e))))
 
     # ----------------------------------------------------------- account
 
