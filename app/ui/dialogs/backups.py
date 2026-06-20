@@ -102,9 +102,9 @@ def _short_when(moment):
 
 def _content_summary(words, texts, tags):
     """Counts -> 'X words · Y texts · Z tags' with grammar and grouping."""
-    w_noun = ntr(words, tr("word"), tr("words"), tr("words"))
-    t_noun = ntr(texts, tr("text"), tr("texts"), tr("texts"))
-    g_noun = ntr(tags, tr("tag"), tr("tags"), tr("tags"))
+    w_noun = ntr(words, tr("word"), tr("words"), tr("words (genitive)"))
+    t_noun = ntr(texts, tr("text"), tr("texts"), tr("texts (genitive)"))
+    g_noun = ntr(tags, tr("tag"), tr("tags"), tr("tags (genitive)"))
     return " · ".join((f"{words:,} {w_noun}", f"{texts:,} {t_noun}", f"{tags:,} {g_noun}"))
 
 

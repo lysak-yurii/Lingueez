@@ -560,7 +560,7 @@ class AreaChart(_Animated, QWidget):
             self.update()
         d, c = self._points[i]
         label = f"{d.day:02d} {month_abbr(d)} {d.year}" if hasattr(d, "strftime") else str(d)
-        noun = ntr(c, tr("word"), tr("words"), tr("words"))
+        noun = ntr(c, tr("word"), tr("words"), tr("words (genitive)"))
         QToolTip.showText(event.globalPosition().toPoint(),
                           f"{c:,} {noun}\n{label}", self)
 
@@ -661,7 +661,7 @@ class ActivityHeatmap(_Animated, QWidget):
             if cell is not None:
                 d, count = cell
                 label = f"{d.day:02d} {month_abbr(d)} {d.year}" if hasattr(d, "strftime") else str(d)
-                noun = ntr(count, tr("word"), tr("words"), tr("words"))
+                noun = ntr(count, tr("word"), tr("words"), tr("words (genitive)"))
                 QToolTip.showText(
                     event.globalPosition().toPoint(),
                     f"{count:,} {noun}  ·  {label}", self)

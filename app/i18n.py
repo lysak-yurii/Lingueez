@@ -109,7 +109,10 @@ def ntr(count: int, one: str, few: str, many: str = None) -> str:
       - many → everything else (0, 5-20, 11-14, 25-30, …)
     """
     if _lang != "uk":
-        return one if count == 1 else (many or few)
+        # English (and any non-uk locale) has a single plural — use `few` for it.
+        # `many` is reserved for languages like Ukrainian that need a third form,
+        # so its source string is never shown here (callers can pass a marker key).
+        return one if count == 1 else few
     mod100 = count % 100
     if 11 <= mod100 <= 14:
         return many or few

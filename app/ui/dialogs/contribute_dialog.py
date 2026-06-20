@@ -39,15 +39,17 @@ class ContributeDialog(FramelessDialog):
     """Counts + selectable checklist of local items missing from the account."""
 
     def __init__(self, parent, email, words, texts, suppressed=False):
-        super().__init__(parent, title=tr("Add local items to your account"))
+        super().__init__(parent, title=tr("Sync this device's data to your account"))
         self._words = words
         self._texts = texts
         self.setMinimumWidth(440)
         self.setMinimumHeight(420)
 
         nw, nt = len(words), len(texts)
-        word_phrase = ntr(nw, tr("{n} word"), tr("{n} words")).format(n=nw)
-        text_phrase = ntr(nt, tr("{n} text"), tr("{n} texts")).format(n=nt)
+        word_phrase = ntr(nw, tr("{n} word"), tr("{n} words"),
+                          tr("{n} words (genitive)")).format(n=nw)
+        text_phrase = ntr(nt, tr("{n} text"), tr("{n} texts"),
+                          tr("{n} texts (genitive)")).format(n=nt)
         account = email or tr("your account")
         # Phrased with "This device has …" so it reads correctly for both singular
         # and plural counts (no verb-agreement pitfalls).
@@ -152,7 +154,8 @@ class ContributeDialog(FramelessDialog):
     def _update_add_button(self):
         n = len(self._checked(self._word_list)) + len(self._checked(self._text_list))
         self._add_btn.setText(
-            ntr(n, tr("Add {n} item"), tr("Add {n} items")).format(n=n))
+            ntr(n, tr("Add {n} item"), tr("Add {n} items"),
+                tr("Add {n} items (genitive)")).format(n=n))
         self._add_btn.setEnabled(n > 0)
 
     # ---- result ------------------------------------------------------

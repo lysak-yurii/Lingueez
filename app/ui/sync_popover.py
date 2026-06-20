@@ -256,10 +256,10 @@ class SyncPopover(QFrame):
         if operations or deletions:
             parts = []
             if operations:
-                noun = ntr(operations, tr("change"), tr("changes"), tr("changes"))
+                noun = ntr(operations, tr("change"), tr("changes"), tr("changes (genitive)"))
                 parts.append(f"{operations} {noun}")
             if deletions:
-                noun = ntr(deletions, tr("deletion"), tr("deletions"), tr("deletions"))
+                noun = ntr(deletions, tr("deletion"), tr("deletions"), tr("deletions (genitive)"))
                 parts.append(f"{deletions} {noun}")
             self._set_value("pending", " · ".join(parts),
                             color=self._colors["warning"])

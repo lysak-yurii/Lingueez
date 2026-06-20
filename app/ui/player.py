@@ -180,7 +180,7 @@ class WordPlayer(QObject):
                     skipped = dict(session.skipped)
                 if skipped:
                     total = sum(skipped.values())
-                    noun = ntr(total, tr("word"), tr("words"), tr("words"))
+                    noun = ntr(total, tr("word"), tr("words"), tr("words (genitive)"))
                     reasons = ", ".join(skipped)
                     self.synthesis_warning.emit(
                         tr("Skipped {n} {noun} ({reasons}).").format(

@@ -2856,7 +2856,8 @@ class MainWindow(QMainWindow):
                 added, failed = res
                 self.reload_requested.emit()
                 msg = ntr(added, tr("Added {n} item to your account."),
-                          tr("Added {n} items to your account.")).format(n=added)
+                          tr("Added {n} items to your account."),
+                          tr("Added {n} items to your account. (genitive)")).format(n=added)
                 if failed:
                     msg += " " + tr("{n} couldn't be added.").format(n=failed)
                 show_toast(self, tr("Account"), msg, "success" if added else "warning")
