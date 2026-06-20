@@ -211,6 +211,8 @@ TRANSLATIONS: dict[str, str] = {
     "Account deleted.": "Обліковий запис видалено.",
     "Could not delete the account.": "Не вдалося видалити обліковий запис.",
     # ── Sign-in dialog ───────────────────────────────────────────────────
+    "Name": "Ім'я",
+    "Enter your name.": "Введіть своє ім'я.",
     "Email": "Електронна пошта",
     "Password": "Пароль",
     "New password": "Новий пароль",
@@ -306,7 +308,7 @@ TRANSLATIONS: dict[str, str] = {
     "Export my data…": "Експортувати мої дані…",
     "Delete account…": "Видалити обліковий запис…",
     "Cloud sync is on — your own server ({host})": "Хмарна синхронізація увімкнена — ваш власний сервер ({host})",
-    "Cloud sync is on — signed in as {email}": "Хмарна синхронізація увімкнена — ви увійшли як {email}",
+    "Cloud sync is on — signed in as {who}": "Хмарна синхронізація увімкнена — ви увійшли як {who}",
     "Cloud sync is off — your words are saved on this device only": "Хмарна синхронізація вимкнена — ваші слова зберігаються лише на цьому пристрої",
     "(checking…)": "(перевірка…)",
     "(can't connect)": "(немає з'єднання)",

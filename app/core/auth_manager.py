@@ -117,6 +117,19 @@ class AuthManager:
     def current_user_id(self) -> Optional[str]:
         return getattr(self._user, "id", None) if self._user else None
 
+    def current_user_name(self) -> Optional[str]:
+        """Display name from the signed-in user's metadata (set at sign-up, or by
+        Google), falling back to the email. Read from the in-memory session user —
+        no network/database call."""
+        if not self._user:
+            return None
+        meta = getattr(self._user, "user_metadata", None) or {}
+        for key in ("display_name", "full_name", "name"):
+            value = meta.get(key)
+            if value:
+                return value
+        return getattr(self._user, "email", None)
+
     # ---- email + password ---------------------------------------------
     def sign_in(self, email: str, password: str) -> Result:
         auth = self.sb.get_auth()
@@ -131,12 +144,20 @@ class AuthManager:
         self._on_session(res.session)
         return True, None
 
-    def sign_up(self, email: str, password: str) -> Result:
+    def sign_up(self, email: str, password: str, name: str = "") -> Result:
         auth = self.sb.get_auth()
         if auth is None:
             return False, self._not_configured()
         try:
-            res = auth.sign_up({"email": email.strip(), "password": password})
+            credentials = {"email": email.strip(), "password": password}
+            name = (name or "").strip()
+            if name:
+                # Stored as user_metadata; `display_name` is what the Supabase
+                # dashboard shows (matching how a Google account's name appears),
+                # with full_name/name set too for clients that read those.
+                credentials["options"] = {"data": {
+                    "display_name": name, "full_name": name, "name": name}}
+            res = auth.sign_up(credentials)
         except Exception as exc:
             return False, self._friendly(exc)
         if getattr(res, "session", None):
@@ -409,7 +430,10 @@ class AuthManager:
                 "access_token": session.access_token,
                 "refresh_token": session.refresh_token,
             })
-            self.registry.upsert(uid, self.current_user())
+            meta = getattr(self._user, "user_metadata", None) or {}
+            name = next((meta.get(k) for k in ("display_name", "full_name", "name")
+                         if meta.get(k)), None)
+            self.registry.upsert(uid, self.current_user(), name)
             self.registry.set_active(uid)
             self.registry.mark_needs_reauth(uid, False)
         except Exception as exc:

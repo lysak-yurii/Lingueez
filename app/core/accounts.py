@@ -125,7 +125,7 @@ class AccountRegistry:
             data["local_import_done"] = bool(done)
             self._save(data)
 
-    def upsert(self, uid: str, email: Optional[str]) -> None:
+    def upsert(self, uid: str, email: Optional[str], name: Optional[str] = None) -> None:
         """Add or update an account, preserving fields not given here."""
         with self._lock:
             data = self._load()
@@ -133,6 +133,8 @@ class AccountRegistry:
             entry.setdefault("added_at", _now_iso())
             if email is not None:
                 entry["email"] = email
+            if name:
+                entry["name"] = name
             entry.setdefault("last_synced_at", None)
             entry["needs_reauth"] = entry.get("needs_reauth", False)
             data["accounts"][uid] = entry

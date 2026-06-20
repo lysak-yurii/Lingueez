@@ -322,7 +322,7 @@ class SyncManager:
         or just "Personal" for the own-Supabase mode (the server's address is private
         and not worth surfacing in the status bubble). None when local-only."""
         if self.auth.is_logged_in():
-            return self.auth.current_user() or self.auth.current_user_id()
+            return self.auth.current_user_name() or self.auth.current_user_id()
         if is_custom_server():
             from app.i18n import tr
             return tr("Personal")

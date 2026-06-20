@@ -59,6 +59,14 @@ class AccountDialog(FramelessDialog):
 
         layout = self.content_layout
 
+        # Sign-up only: the display name, stored on the account so it shows up
+        # (e.g. in the Supabase dashboard) just like a Google account's name.
+        self.name = QLineEdit()
+        self.name.setPlaceholderText(tr("Name"))
+        self.name.returnPressed.connect(self._submit)
+        self.name.setVisible(False)
+        layout.addWidget(self.name)
+
         self.email = QLineEdit()
         self.email.setPlaceholderText(tr("Email"))
         layout.addWidget(self.email)
@@ -140,6 +148,7 @@ class AccountDialog(FramelessDialog):
         sign_up = self._mode == "sign_up"
         code_step = verify or reset
 
+        self.name.setVisible(sign_up)              # display name only when signing up
         self.email.setReadOnly(code_step)
         self.password.setVisible(not verify)  # hidden when confirming, shown as
         self.password.setPlaceholderText(     # the *new* password when resetting
@@ -182,14 +191,17 @@ class AccountDialog(FramelessDialog):
         else:
             self._mode = "sign_up" if self._mode == "sign_in" else "sign_in"
             self.confirm_password.clear()  # don't carry a stale re-type between modes
+            self.name.clear()
         self._clear_status()
         self._apply_mode()
-        (self.code if self._mode in ("verify", "reset") else self.email).setFocus()
+        focus = {"verify": self.code, "reset": self.code,
+                 "sign_up": self.name}.get(self._mode, self.email)
+        focus.setFocus()
 
     def _set_busy(self, busy):
         for w in (self.primary, self.google_btn, self.toggle_btn, self.forgot_btn,
-                  self.resend_btn, self.email, self.password, self.confirm_password,
-                  self.code):
+                  self.resend_btn, self.name, self.email, self.password,
+                  self.confirm_password, self.code):
             w.setEnabled(not busy)
 
     def _set_status(self, text, kind="error"):
@@ -216,12 +228,20 @@ class AccountDialog(FramelessDialog):
         if not email or not pw:
             self._set_status(tr("Enter your email and password."))
             return
-        if self._mode == "sign_up" and pw != self.confirm_password.text():
-            self._set_status(tr("Passwords don't match."))
+        if self._mode == "sign_up":
+            name = self.name.text().strip()
+            if not name:
+                self._set_status(tr("Enter your name."))
+                return
+            if pw != self.confirm_password.text():
+                self._set_status(tr("Passwords don't match."))
+                return
+            self._set_busy(True)
+            run_in_thread(self.auth.sign_up, email, pw, name,
+                          on_result=self._on_auth_result, on_error=self._on_thread_error)
             return
         self._set_busy(True)
-        fn = self.auth.sign_in if self._mode == "sign_in" else self.auth.sign_up
-        run_in_thread(fn, email, pw,
+        run_in_thread(self.auth.sign_in, email, pw,
                       on_result=self._on_auth_result, on_error=self._on_thread_error)
 
     def _verify(self):

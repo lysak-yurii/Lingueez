@@ -721,8 +721,11 @@ class SettingsDialog(FramelessDialog):
             on_text = tr("Cloud sync is on — your own server ({host})").format(
                 host=custom_server_host() or tr("your server"))
         elif auth.is_logged_in():
-            on_text = tr("Cloud sync is on — signed in as {email}").format(
-                email=auth.current_user() or auth.current_user_id() or "")
+            name = auth.current_user_name()
+            email = auth.current_user()
+            who = (f"{name} ({email})" if name and email and name != email
+                   else (email or name or auth.current_user_id() or ""))
+            on_text = tr("Cloud sync is on — signed in as {who}").format(who=who)
         else:
             render("○", colors["text_dim"],
                    tr("Cloud sync is off — your words are saved on this device only"))
@@ -967,8 +970,9 @@ class SettingsDialog(FramelessDialog):
         h.setContentsMargins(0, 0, 0, 0)
         uid = acc["uid"]
         email = acc.get("email") or uid
+        name = acc.get("name")
         is_active = uid == active_uid
-        text = email
+        text = f"{name} ({email})" if name and name != email else email
         if is_active:
             text += "  " + tr("(active)")
         elif acc.get("needs_reauth"):
