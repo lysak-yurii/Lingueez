@@ -587,26 +587,29 @@ class SettingsDialog(FramelessDialog):
         form = QFormLayout(sync)
         form.setContentsMargins(18, 18, 18, 18)
 
-        # --- Account (sync requires being signed in) ---
-        self.account_status = QLabel()
-        self.account_status.setWordWrap(True)
-        form.addRow(tr("Account"), self.account_status)
+        # --- Accounts (cloud sync follows being signed in) ---
+        # Several accounts can be remembered on one device and switched between
+        # without re-entering the password; the active one is what syncs.
+        self.accounts_box = QVBoxLayout()
+        self.accounts_box.setContentsMargins(0, 0, 0, 0)
+        accounts_container = QWidget()
+        accounts_container.setLayout(self.accounts_box)
+        form.addRow(tr("Accounts"), accounts_container)
+
         acct_row = QHBoxLayout()
-        self.signin_btn = QPushButton(tr("Sign in / Create account"))
-        self.signin_btn.clicked.connect(self._open_account_dialog)
-        self.signout_btn = QPushButton(tr("Sign out"))
-        self.signout_btn.clicked.connect(self._sign_out)
+        self.addaccount_btn = QPushButton(tr("Add account…"))
+        self.addaccount_btn.clicked.connect(self._open_account_dialog)
+        self.local_btn = QPushButton(tr("Use local-only"))
+        self.local_btn.clicked.connect(self._use_local_only)
         self.export_data_btn = QPushButton(tr("Export my data…"))
         self.export_data_btn.clicked.connect(self._export_account_data)
         self.delete_account_btn = QPushButton(tr("Delete account…"), objectName="dangerButton")
         self.delete_account_btn.clicked.connect(self._delete_account)
-        for b in (self.signin_btn, self.signout_btn, self.export_data_btn, self.delete_account_btn):
+        for b in (self.addaccount_btn, self.local_btn, self.export_data_btn, self.delete_account_btn):
             acct_row.addWidget(b)
         acct_row.addStretch(1)
         form.addRow(acct_row)
         self._refresh_account_ui()
-
-        form.addRow(tr("Enable cloud sync"), self._check("enable_sync", False))
 
         # Bring-your-own Supabase project: hidden by default — the app ships with a
         # built-in central project, so normal users just sign in. Set
@@ -762,16 +765,89 @@ class SettingsDialog(FramelessDialog):
 
     def _refresh_account_ui(self):
         auth = get_auth_manager()
-        logged_in = auth.is_logged_in()
-        if logged_in:
-            self.account_status.setText(
-                tr("Signed in as {email}").format(email=auth.current_user() or ""))
+        # Rebuild the remembered-accounts list.
+        while self.accounts_box.count():
+            item = self.accounts_box.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        accounts = auth.registry.list_accounts()
+        active = auth.current_user_id() if auth.is_logged_in() else None
+        if not accounts:
+            lbl = QLabel(tr("No accounts yet. Add one to sync your words across devices."))
+            lbl.setWordWrap(True)
+            lbl.setObjectName("dimLabel")
+            self.accounts_box.addWidget(lbl)
         else:
-            self.account_status.setText(
-                tr("Not signed in. Sign in to sync your words across devices."))
-        self.signin_btn.setVisible(not logged_in)
-        for b in (self.signout_btn, self.export_data_btn, self.delete_account_btn):
+            for acc in accounts:
+                self.accounts_box.addWidget(self._account_row(acc, active))
+        logged_in = auth.is_logged_in()
+        self.local_btn.setVisible(logged_in)
+        for b in (self.export_data_btn, self.delete_account_btn):
             b.setVisible(logged_in)
+
+    def _account_row(self, acc, active_uid):
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        uid = acc["uid"]
+        email = acc.get("email") or uid
+        is_active = uid == active_uid
+        text = email
+        if is_active:
+            text += "  " + tr("(active)")
+        elif acc.get("needs_reauth"):
+            text += "  " + tr("(sign in again)")
+        label = QLabel(text)
+        label.setWordWrap(True)
+        if is_active:
+            label.setObjectName("accentLabel")
+        h.addWidget(label, 1)
+        if acc.get("needs_reauth") and not is_active:
+            signin = QPushButton(tr("Sign in"))
+            signin.clicked.connect(self._open_account_dialog)
+            h.addWidget(signin)
+        elif not is_active:
+            switch = QPushButton(tr("Switch"))
+            switch.clicked.connect(lambda _=False, u=uid: self._switch_account(u))
+            h.addWidget(switch)
+        remove = QPushButton(tr("Remove"))
+        remove.clicked.connect(lambda _=False, u=uid, e=email: self._forget_account(u, e))
+        h.addWidget(remove)
+        return row
+
+    def _switch_account(self, uid):
+        mw = self.parent()
+        if mw is not None and hasattr(mw, "switch_active_account"):
+            mw.switch_active_account(uid)
+        self._refresh_account_ui()
+
+    def _use_local_only(self):
+        mw = self.parent()
+        if mw is not None and hasattr(mw, "switch_active_account"):
+            mw.switch_active_account(None)
+        self._refresh_account_ui()
+        show_toast(self, tr("Account"), tr("Using local-only mode."), "info")
+
+    def _forget_account(self, uid, email):
+        confirm = QMessageBox.question(
+            self, tr("Remove account"),
+            tr("Remove {email} from this device? You can add it again anytime — your "
+               "words stay in the cloud, and the local copy remains on disk. Your "
+               "cloud data is not deleted.").format(email=email),
+            QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+        if confirm != QMessageBox.Yes:
+            return
+        auth = get_auth_manager()
+        was_active = uid == auth.current_user_id()
+        auth.forget_account(uid)
+        if was_active:
+            mw = self.parent()
+            if mw is not None and hasattr(mw, "switch_active_account"):
+                mw.switch_active_account(None)
+        self._refresh_account_ui()
+        show_toast(self, tr("Account"),
+                   tr("Removed {email} from this device.").format(email=email), "success")
 
     def _open_account_dialog(self):
         # Advanced (bring-your-own) mode only: apply whatever URL/key is currently
@@ -802,18 +878,6 @@ class SettingsDialog(FramelessDialog):
             if mw is not None and hasattr(mw, "switch_active_account"):
                 mw.switch_active_account(get_auth_manager().current_user_id())
 
-    def _sign_out(self):
-        ok, msg = get_auth_manager().sign_out()
-        self._refresh_account_ui()
-        show_toast(self, tr("Account"), msg or tr("Signed out."),
-                   "success" if ok else "error")
-        # Return to the local-only dictionary.db (the account's file is left on
-        # disk untouched for next sign-in).
-        if ok:
-            mw = self.parent()
-            if mw is not None and hasattr(mw, "switch_active_account"):
-                mw.switch_active_account(None)
-
     def _export_account_data(self):
         path, _ = QFileDialog.getSaveFileName(
             self, tr("Export my data…"), "lingueez-account-data.json",
@@ -843,12 +907,8 @@ class SettingsDialog(FramelessDialog):
         def done(result):
             ok, err = result
             if ok:
-                # Archive the deleted account's local DB so the now-orphaned data
-                # isn't left behind, then return to the local-only store.
-                try:
-                    self._sync_manager().archive_and_reset_local_db()
-                except Exception:
-                    pass
+                # delete_account already archived + removed the local file and forgot
+                # the account; just refresh and drop the UI to local-only.
                 self._refresh_account_ui()
                 mw = self.parent()
                 if mw is not None and hasattr(mw, "switch_active_account"):

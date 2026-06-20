@@ -116,13 +116,13 @@ class BinWindow(FramelessDialog):
         for it in self.db_adapter.get_binned_items(table_name):
             key = it.get('ID') or it.get('id')
             if key is not None:
-                items[int(key)] = it
+                items[key] = it
         cloud = self._cloud()
         if cloud:
             for it in cloud.get_all_soft_deleted_items(table_name):
                 key = it.get('ID') or it.get('id')
-                if key is not None and int(key) not in items:
-                    items[int(key)] = it
+                if key is not None and key not in items:
+                    items[key] = it
         return list(items.values())
 
     def load_data(self):
@@ -158,7 +158,7 @@ class BinWindow(FramelessDialog):
         else:
             table, item_type = self.texts_table, "texts"
         rows = sorted({ix.row() for ix in table.selectionModel().selectedRows()}, reverse=True)
-        return [(item_type, int(table.item(r, 0).text()), r, table) for r in rows]
+        return [(item_type, table.item(r, 0).text(), r, table) for r in rows]
 
     def restore_selected(self):
         items = self._selected()

@@ -919,7 +919,7 @@ class TextsPage(QWidget):
 
     def _write_text(self, text, data):
         try:
-            self.db_adapter.update_text(int(text['ID']), data)
+            self.db_adapter.update_text(text['ID'], data)
             backup_database()
             text.update(data)
             return True
@@ -966,7 +966,7 @@ class TextsPage(QWidget):
         elif row > 0:
             neighbor = self.filtered[row - 1].get('ID')
         try:
-            self.db_adapter.delete_text(int(self.current['ID']))
+            self.db_adapter.delete_text(self.current['ID'])
             backup_database()
         except Exception as exc:
             logging.error(f"Failed to delete text: {exc}")

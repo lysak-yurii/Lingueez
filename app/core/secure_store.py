@@ -19,7 +19,7 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Secure storage for the Supabase auth session (access + refresh tokens).
+"""Secure storage for Supabase auth sessions (access + refresh tokens).
 
 The refresh token is the crown jewel — anyone holding it can mint new access
 tokens for the account — so it must never land in plaintext ``settings.cfg`` or
@@ -34,7 +34,12 @@ tokens for the account — so it must never land in plaintext ``settings.cfg`` o
    this is obfuscation-grade, not keychain-grade, hence the strong preference for
    the keychain.
 
-Stored value is one JSON blob: ``{"access_token": ..., "refresh_token": ...}``.
+Sessions are stored **per account uid** so several accounts can stay remembered
+on one device and be switched between without re-entering a password. The keychain
+holds one entry per uid (``supabase_session::<uid>``); the encrypted-file fallback
+holds a single JSON **map** ``{"<uid>": {"access_token": ..., "refresh_token": ...}}``.
+Which uids exist is tracked by :class:`~app.core.accounts.AccountRegistry` (the
+keychain can't be enumerated); this store only persists the secrets.
 """
 import base64
 import json
@@ -42,12 +47,13 @@ import logging
 import os
 
 _SERVICE = "Lingueez"
-_ACCOUNT = "supabase_session"
+_ACCOUNT_PREFIX = "supabase_session::"
+_LEGACY_ACCOUNT = "supabase_session"  # pre-multi-account single slot
 _FALLBACK_FILE = ".session.enc"
 
 
 class SecureStore:
-    """Single-slot secret store: keychain first, encrypted file as fallback."""
+    """Per-uid secret store: keychain first, encrypted file as fallback."""
 
     def __init__(self, data_dir=None):
         # CWD is the per-user data dir at runtime (main._setup_paths chdirs there).
@@ -70,37 +76,77 @@ class SecureStore:
             logging.info(f"keyring unavailable ({exc}); using encrypted-file session store.")
             return None
 
-    # ---- public API ----------------------------------------------------
-    def save(self, data: dict) -> None:
+    @staticmethod
+    def _acct(uid: str) -> str:
+        return f"{_ACCOUNT_PREFIX}{uid}"
+
+    # ---- public API (per uid) -----------------------------------------
+    def save(self, uid: str, data: dict) -> None:
         blob = json.dumps(data)
         if self._keyring is not None:
             try:
-                self._keyring.set_password(_SERVICE, _ACCOUNT, blob)
-                self._remove_file()  # don't leave a stale duplicate behind
+                self._keyring.set_password(_SERVICE, self._acct(uid), blob)
+                self._file_drop(uid)  # don't leave a stale duplicate behind
                 return
             except Exception as exc:
                 logging.warning(f"Keychain write failed, falling back to encrypted file: {exc}")
-        self._save_file(blob)
+        self._file_put(uid, data)
 
-    def load(self) -> dict | None:
+    def load(self, uid: str) -> dict | None:
         if self._keyring is not None:
             try:
-                blob = self._keyring.get_password(_SERVICE, _ACCOUNT)
+                blob = self._keyring.get_password(_SERVICE, self._acct(uid))
                 if blob:
                     return json.loads(blob)
             except Exception as exc:
                 logging.warning(f"Keychain read failed, trying encrypted file: {exc}")
-        return self._load_file()
+        return self._file_get(uid)
 
-    def clear(self) -> None:
+    def clear(self, uid: str) -> None:
         if self._keyring is not None:
             try:
-                self._keyring.delete_password(_SERVICE, _ACCOUNT)
+                self._keyring.delete_password(_SERVICE, self._acct(uid))
             except Exception:
                 pass  # absent or backend gone — nothing to remove
+        self._file_drop(uid)
+
+    def clear_all(self, uids=()) -> None:
+        """Remove the encrypted-file map entirely and, for each given uid, the
+        matching keychain entry (the keychain can't be enumerated, so callers pass
+        the uids they know from the registry)."""
+        for uid in uids:
+            if self._keyring is not None:
+                try:
+                    self._keyring.delete_password(_SERVICE, self._acct(uid))
+                except Exception:
+                    pass
         self._remove_file()
 
-    # ---- encrypted-file fallback --------------------------------------
+    # ---- legacy single-slot migration ---------------------------------
+    def load_legacy(self) -> dict | None:
+        """The pre-multi-account session, if one is still stored single-slot."""
+        if self._keyring is not None:
+            try:
+                blob = self._keyring.get_password(_SERVICE, _LEGACY_ACCOUNT)
+                if blob:
+                    return json.loads(blob)
+            except Exception:
+                pass
+        raw = self._read_map()
+        if "access_token" in raw:  # old top-level (non-uid-keyed) blob
+            return raw
+        return None
+
+    def clear_legacy(self) -> None:
+        if self._keyring is not None:
+            try:
+                self._keyring.delete_password(_SERVICE, _LEGACY_ACCOUNT)
+            except Exception:
+                pass
+        if "access_token" in self._read_map():
+            self._remove_file()
+
+    # ---- encrypted-file fallback (uid -> session map) -----------------
     @property
     def _file_path(self) -> str:
         return os.path.join(self._dir, _FALLBACK_FILE)
@@ -123,8 +169,22 @@ class SecureStore:
         )
         return Fernet(base64.urlsafe_b64encode(kdf.derive(secret)))
 
-    def _save_file(self, blob: str) -> None:
+    def _read_map(self) -> dict:
+        """Decrypt the fallback file into a dict (may be the legacy top-level
+        blob or the uid-keyed map); empty dict if absent/unreadable."""
         try:
+            if not os.path.exists(self._file_path):
+                return {}
+            with open(self._file_path, "rb") as fh:
+                token = fh.read()
+            return json.loads(self._fernet().decrypt(token).decode("utf-8"))
+        except Exception as exc:
+            logging.info(f"No restorable session in encrypted file ({exc}).")
+            return {}
+
+    def _write_map(self, mapping: dict) -> None:
+        try:
+            blob = json.dumps(mapping)
             token = self._fernet().encrypt(blob.encode("utf-8"))
             tmp = self._file_path + ".tmp"
             with open(tmp, "wb") as fh:
@@ -135,16 +195,28 @@ class SecureStore:
             # user simply re-logs in next launch, which is the safe failure mode.
             logging.warning(f"Could not persist session securely ({exc}); not saving tokens.")
 
-    def _load_file(self) -> dict | None:
-        try:
-            if not os.path.exists(self._file_path):
-                return None
-            with open(self._file_path, "rb") as fh:
-                token = fh.read()
-            return json.loads(self._fernet().decrypt(token).decode("utf-8"))
-        except Exception as exc:
-            logging.info(f"No restorable session in encrypted file ({exc}).")
-            return None
+    def _file_get(self, uid: str) -> dict | None:
+        raw = self._read_map()
+        entry = raw.get(uid)
+        return entry if isinstance(entry, dict) else None
+
+    def _file_put(self, uid: str, data: dict) -> None:
+        raw = self._read_map()
+        if "access_token" in raw:  # discard a legacy top-level blob
+            raw = {}
+        raw[uid] = data
+        self._write_map(raw)
+
+    def _file_drop(self, uid: str) -> None:
+        raw = self._read_map()
+        if "access_token" in raw:
+            return  # legacy blob, not a uid map — leave for clear_legacy
+        if uid in raw:
+            raw.pop(uid, None)
+            if raw:
+                self._write_map(raw)
+            else:
+                self._remove_file()
 
     def _remove_file(self) -> None:
         try:

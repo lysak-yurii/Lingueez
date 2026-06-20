@@ -253,11 +253,11 @@ class SupabaseClient:
             'tag_name': 'tag_name',
             'word_id': 'word_id',
         }
-        # Local-only / server-owned fields that should never be sent to Supabase.
-        # user_id is stamped server-side by the `default auth.uid()` column (and
-        # the RLS `with check` policy rejects a mismatched value), so we never
-        # send it from the client even if a cloud read round-trips it back.
-        local_only_fields = {'cloud_id', 'Cloud_id', 'CLOUD_ID', 'user_id'}
+        # Server-owned fields that should never be sent to Supabase. user_id is
+        # stamped server-side by the `default auth.uid()` column (and the RLS
+        # `with check` policy rejects a mismatched value), so we never send it from
+        # the client even if a cloud read round-trips it back.
+        local_only_fields = {'user_id'}
         
         result = {}
         for key, value in data.items():
@@ -374,80 +374,92 @@ class SupabaseClient:
             return None
 
     def upsert_word(self, word_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Insert or update a word in Supabase based on content matching.
-        
-        First checks if a word with the same content (Language1, Word1, Language2, Word2) exists.
-        If found, updates it. If not found, inserts it (with auto-generated ID).
-        
-        Args:
-            word_data: Word data to insert or update
-            
-        Returns:
-            Word dict if successful, None otherwise
+        """Insert or update a word in Supabase, keyed on its UUID primary key.
+
+        The word's ``ID`` is the same UUID locally and in the cloud, so this is a
+        single ``upsert ... on conflict (id)``. The only fallback is the rare
+        cross-device case where the *same* (word1, word2) pair was created
+        independently under two different UUIDs: that trips the per-user
+        ``words_user_word_key`` constraint, and we adopt the existing cloud row
+        (the caller re-keys the local row to the returned id).
+
+        Returns the resulting cloud row (mapped to SQLite format), whose ``ID``
+        may differ from the input on a content collision, or None on failure.
         """
         if not self.client:
             return None
-        
-        # Extract content fields for matching
+
+        mapped_data = self._map_to_supabase_format(word_data)
+        word_id = mapped_data.get('id')
+        if not word_id:
+            # No client id (shouldn't happen post-migration) — let the server mint one.
+            return self.insert_word(word_data)
+
+        try:
+            response = self.client.table('words').upsert(
+                mapped_data, on_conflict='id').execute()
+            if response.data:
+                return self._map_to_sqlite_format(response.data[0])
+            return None
+        except Exception as e:
+            err = str(e)
+            if not ('23505' in err or 'duplicate key' in err.lower()):
+                logging.error(f"Error upserting word {word_id} into Supabase: {e}")
+                return None
+
+        # Content collision: same (word1, word2) under a different id. Adopt it.
         language1 = word_data.get('Language1') or word_data.get('language1')
         word1 = word_data.get('Word1') or word_data.get('word1')
         language2 = word_data.get('Language2') or word_data.get('language2')
         word2 = word_data.get('Word2') or word_data.get('word2')
-        
-        if not all([language1, word1, language2, word2]):
-            logging.error("Cannot upsert word: missing required content fields (Language1, Word1, Language2, Word2)")
-            return None
-        
-        # Try to find existing word by content
         existing_word = self.find_word_by_content(language1, word1, language2, word2)
-        
         if existing_word:
-            # Word exists, update it
             cloud_id = existing_word.get('ID') or existing_word.get('id')
-            if cloud_id:
-                logging.debug(f"Found existing word with content ({language1}, {word1}, {language2}, {word2}), updating ID {cloud_id}")
-                return self.update_word(cloud_id, word_data)
-            else:
-                logging.warning(f"Found existing word but couldn't get ID, falling back to insert")
+            logging.info(f"Word ({word1!r}, {word2!r}) already exists in cloud under "
+                         f"id {cloud_id} (not {word_id}) — adopting that row")
+            return self.update_word(cloud_id, word_data)
 
-        # No live match — but a soft-deleted row with the same word pair still
-        # blocks an insert (the unique constraint covers binned rows too).
-        # Restore that row with the new data instead of failing with a 409.
+        # The colliding row may be soft-deleted (the unique constraint covers
+        # binned rows too) — restore it with the new data instead of failing.
         deleted_word = self.find_soft_deleted_word(word1, word2)
         if deleted_word:
             cloud_id = deleted_word.get('ID') or deleted_word.get('id')
-            if cloud_id:
-                logging.info(f"Word ({word1}, {word2}) exists soft-deleted in cloud "
-                             f"(ID {cloud_id}) — restoring it with the new data")
-                return self.restore_word_with_data(cloud_id, word_data)
+            logging.info(f"Word ({word1!r}, {word2!r}) exists soft-deleted in cloud "
+                         f"(id {cloud_id}) — restoring it with the new data")
+            return self.restore_word_with_data(cloud_id, word_data)
 
-        # Word doesn't exist, insert it (auto-generate ID)
-        logging.debug(f"No existing word found with content ({language1}, {word1}, {language2}, {word2}), inserting new")
-        return self.insert_word(word_data, preserve_id=False)
-    
-    def insert_word(self, word_data: Dict[str, Any], preserve_id: bool = False) -> Optional[Dict[str, Any]]:
+        logging.error(f"Upsert of word {word_id} hit a unique-constraint error but no "
+                      f"matching ({word1!r}, {word2!r}) row was found")
+        return None
+
+    def insert_word(self, word_data: Dict[str, Any], preserve_id: bool = True) -> Optional[Dict[str, Any]]:
         """Insert a new word into Supabase.
-        
+
         Args:
-            word_data: Word data to insert
-            preserve_id: If True, preserve the ID from word_data (for migration). 
-                        If False, let Supabase auto-generate ID (default).
+            word_data: Word data to insert (normally carries its UUID ``ID``).
+            preserve_id: Keep the client-supplied UUID (default). Pass False only
+                to let the server mint an id for an id-less row.
         """
         if not self.client:
             return None
         try:
             mapped_data = self._map_to_supabase_format(word_data)
-            # Remove ID if it's None or 0, unless preserve_id is True
-            if not preserve_id:
-                if 'id' in mapped_data and (mapped_data['id'] is None or mapped_data['id'] == 0):
-                    mapped_data.pop('id', None)
-            # If preserve_id is True, keep the ID (for migration)
+            if not preserve_id or not mapped_data.get('id'):
+                mapped_data.pop('id', None)
             response = self.client.table('words').insert(mapped_data).execute()
             if response.data:
                 return self._map_to_sqlite_format(response.data[0])
             return None
         except Exception as e:
-            logging.error(f"Error inserting word into Supabase: {e}")
+            err = str(e)
+            if '23505' in err or 'duplicate key' in err.lower():
+                logging.error(
+                    f"Word ({mapped_data.get('word1')!r}, {mapped_data.get('word2')!r}) "
+                    f"rejected by a unique constraint — the live DB likely still has the "
+                    f"global words_word1_word2_key instead of per-user words_user_word_key. "
+                    f"Run the migration in supabase_schema.py. ({e})")
+            else:
+                logging.error(f"Error inserting word into Supabase: {e}")
             return None
     
     def update_word(self, word_id: int, word_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -521,27 +533,47 @@ class SupabaseClient:
             logging.error(f"Error fetching text {text_id} from Supabase: {e}")
             return None
     
-    def insert_text(self, text_data: Dict[str, Any], preserve_id: bool = False) -> Optional[Dict[str, Any]]:
+    def insert_text(self, text_data: Dict[str, Any], preserve_id: bool = True) -> Optional[Dict[str, Any]]:
         """Insert a new text into Supabase.
-        
+
         Args:
-            text_data: Text data to insert
-            preserve_id: If True, preserve the ID from text_data (for migration). 
-                        If False, let Supabase auto-generate ID (default).
+            text_data: Text data to insert (normally carries its UUID ``ID``).
+            preserve_id: Keep the client-supplied UUID (default). Pass False only
+                to let the server mint an id for an id-less row.
         """
         if not self.client:
             return None
         try:
             mapped_data = self._map_to_supabase_format(text_data)
-            if not preserve_id:
-                if 'id' in mapped_data and (mapped_data['id'] is None or mapped_data['id'] == 0):
-                    mapped_data.pop('id', None)
+            if not preserve_id or not mapped_data.get('id'):
+                mapped_data.pop('id', None)
             response = self.client.table('texts').insert(mapped_data).execute()
             if response.data:
                 return self._map_to_sqlite_format(response.data[0])
             return None
         except Exception as e:
             logging.error(f"Error inserting text into Supabase: {e}")
+            return None
+
+    def upsert_text(self, text_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Insert or update a text in Supabase, keyed on its UUID primary key.
+
+        Texts have no content-uniqueness constraint, so this is an unconditional
+        ``upsert ... on conflict (id)`` with no fallback path.
+        """
+        if not self.client:
+            return None
+        mapped_data = self._map_to_supabase_format(text_data)
+        if not mapped_data.get('id'):
+            return self.insert_text(text_data)
+        try:
+            response = self.client.table('texts').upsert(
+                mapped_data, on_conflict='id').execute()
+            if response.data:
+                return self._map_to_sqlite_format(response.data[0])
+            return None
+        except Exception as e:
+            logging.error(f"Error upserting text {mapped_data.get('id')} into Supabase: {e}")
             return None
     
     def update_text(self, text_id: int, text_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -612,12 +644,29 @@ class SupabaseClient:
             logging.error(f"Error fetching tag {tag_id} from Supabase: {e}")
             return None
     
-    def insert_tag(self, tag_name: str, tag_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        """Insert a new tag into Supabase.
-        
+    def find_tag_by_name(self, tag_name: str) -> Optional[Dict[str, Any]]:
+        """Find a tag by name (per-user). Returns the tag dict or None."""
+        if not self.client:
+            return None
+        try:
+            response = self.client.table('tags').select('*').eq('tag_name', tag_name).execute()
+            if response.data:
+                return self._map_to_sqlite_format(response.data[0])
+            return None
+        except Exception as e:
+            logging.error(f"Error finding tag {tag_name!r} in Supabase: {e}")
+            return None
+
+    def insert_tag(self, tag_name: str, tag_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Insert (or upsert) a tag into Supabase, keyed on its UUID ``tag_id``.
+
+        Idempotent: upserts on ``tag_id`` when one is supplied, and on the rare
+        cross-device collision where the same ``tag_name`` already exists under a
+        different id, adopts that existing tag.
+
         Args:
-            tag_name: Name of the tag
-            tag_id: Optional tag ID to preserve (for migration). If None, auto-generate.
+            tag_name: Name of the tag.
+            tag_id: The client UUID for the tag. If None, the server mints one.
         """
         if not self.client:
             return None
@@ -625,52 +674,24 @@ class SupabaseClient:
             tag_data = {'tag_name': tag_name}
             if tag_id is not None:
                 tag_data['tag_id'] = tag_id
-            response = self.client.table('tags').insert(tag_data).execute()
+                response = self.client.table('tags').upsert(
+                    tag_data, on_conflict='tag_id').execute()
+            else:
+                response = self.client.table('tags').insert(tag_data).execute()
             if response.data:
                 return self._map_to_sqlite_format(response.data[0])
             return None
         except Exception as e:
-            logging.error(f"Error inserting tag into Supabase: {e}")
+            err = str(e)
+            if '23505' in err or 'duplicate key' in err.lower():
+                existing = self.find_tag_by_name(tag_name)
+                if existing:
+                    logging.info(f"Tag {tag_name!r} already exists in cloud under a "
+                                 f"different id — adopting it")
+                    return existing
+            logging.error(f"Error inserting tag {tag_name!r} into Supabase: {e}")
             return None
-    
-    def reset_sequence(self, table_name: str, sequence_name: str = None):
-        """Reset PostgreSQL sequence after inserting with explicit IDs.
-        
-        This should be called after migration to ensure future auto-generated IDs
-        don't conflict with manually inserted IDs.
-        """
-        if not self.client:
-            return False
-        try:
-            if sequence_name is None:
-                # Default sequence naming: tablename_id_seq
-                sequence_name = f"{table_name}_id_seq"
-            
-            # Get max ID from table
-            if table_name == 'words':
-                max_id_result = self.client.table('words').select('id').order('id', desc=True).limit(1).execute()
-            elif table_name == 'texts':
-                max_id_result = self.client.table('texts').select('id').order('id', desc=True).limit(1).execute()
-            elif table_name == 'tags':
-                max_id_result = self.client.table('tags').select('tag_id').order('tag_id', desc=True).limit(1).execute()
-            else:
-                return False
-            
-            if max_id_result.data:
-                max_id = max_id_result.data[0].get('id') or max_id_result.data[0].get('tag_id', 0)
-                # Reset sequence to max_id + 1
-                # Note: This requires using RPC or direct SQL, which Supabase client might not support directly
-                # We'll log a warning and provide SQL to run manually
-                logging.info(f"To reset sequence for {table_name}, run in Supabase SQL editor:")
-                logging.info(f"SELECT setval('{sequence_name}', {max_id + 1}, false);")
-                return True
-            return False
-        except Exception as e:
-            logging.warning(f"Could not reset sequence for {table_name}: {e}")
-            logging.info(f"After migration, manually reset sequence in Supabase SQL editor:")
-            logging.info(f"SELECT setval('{sequence_name or table_name + '_id_seq'}', (SELECT MAX(id) FROM {table_name}) + 1, false);")
-            return False
-    
+
     # Word_tags operations
     def get_word_tags(self, word_id: int) -> List[Dict[str, Any]]:
         """Get all tags for a word."""

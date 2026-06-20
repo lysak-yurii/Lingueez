@@ -49,8 +49,9 @@ class AddWordDialog(FramelessDialog):
         self.setAttribute(Qt.WA_DeleteOnClose)
 
         settings = load_settings()
-        enable_sync = get_bool(settings, "enable_sync", False)
-        self.db_adapter = DatabaseAdapter(use_cloud=enable_sync)
+        # Cloud sync follows the login state (signed in ⇒ sync on).
+        from app.core.auth_manager import get_auth_manager
+        self.db_adapter = DatabaseAdapter(use_cloud=get_auth_manager().is_logged_in())
         colors = self.colors
 
         languages = sorted(DEEPL_LANGUAGE_CODES.keys())

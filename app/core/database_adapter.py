@@ -22,6 +22,7 @@
 import sqlite3
 from typing import Optional, List, Dict, Any
 from app.core.supabase_client import SupabaseClient, get_supabase
+from app.core.db import new_id
 import logging
 import os
 import json
@@ -619,15 +620,14 @@ class DatabaseAdapter:
             # If cloud is available, try to sync immediately
             if self._use_cloud():
                 try:
-                    # Use upsert logic: find by content, update if found, insert if not (auto-generate ID)
-                    # This prevents sequence sync issues and handles duplicate words correctly
-                    cloud_result = self.supabase.upsert_word(word_data)
+                    # Upsert on the shared UUID id. The only time the returned id
+                    # differs is a cross-device content collision — adopt it.
+                    cloud_result = self.supabase.upsert_word(local_result)
                     if cloud_result:
-                        # Store cloud_id from cloud result
                         cloud_id = cloud_result.get('ID') or cloud_result.get('id')
-                        if cloud_id:
-                            self._update_cloud_id_sqlite(word_id, cloud_id)
-                            logging.debug(f"Stored cloud_id={cloud_id} for word {word_id}")
+                        if cloud_id and cloud_id != word_id:
+                            self._rekey_word_sqlite(word_id, cloud_id)
+                            local_result = self._get_word_sqlite(cloud_id)
                         return local_result
                     else:
                         # Queue operation for later sync
@@ -663,15 +663,16 @@ class DatabaseAdapter:
         if not created_at:
             created_at = datetime.now(timezone.utc).isoformat()
         
+        # The id is a client-generated UUID shared verbatim with the cloud.
+        word_id = new_id()
         cursor.execute('''
-            INSERT INTO words (Language1, Word1, Language2, Word2, Status, Source, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (language1, word1, language2, word2, status, source, created_at))
-        
-        word_id = cursor.lastrowid
+            INSERT INTO words (ID, Language1, Word1, Language2, Word2, Status, Source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (word_id, language1, word1, language2, word2, status, source, created_at))
+
         conn.commit()
         conn.close()
-        
+
         # Return the inserted word
         return self._get_word_sqlite(word_id)
     
@@ -714,187 +715,57 @@ class DatabaseAdapter:
                     return 1
                 return 0
     
-    def update_word(self, word_id: int, word_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Update a word. Updates both local and cloud if available.
-        
-        Uses cloud_id if available for reliable cloud word identification.
-        Before updating, checks if cloud has a newer version and syncs it first
-        to prevent conflicts when word was edited in web app.
+    def update_word(self, word_id: str, word_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update a word locally and in the cloud (same UUID id on both sides).
+
+        Before applying the edit, if the cloud holds a newer version of this row
+        (last-write-wins by timestamp), merge that down first so the user's edit
+        builds on the latest data instead of clobbering a remote change.
         """
-        # Get OLD word data BEFORE updating (needed to find cloud word)
         old_word_data = self._get_word_sqlite(word_id)
-        
-        # Store cloud word ID if we find it - we'll need it to update regardless of content changes
-        cloud_word_id = None
-        
-        # If cloud is available, check for newer version and sync it first
+
+        # Cloud-newer check: the cloud row has the same id, so look it up directly.
         if self._use_cloud() and old_word_data:
             try:
-                # Get cloud_id from local word (most reliable way to find cloud word)
-                cloud_word_id = old_word_data.get('cloud_id')
-                
-                if cloud_word_id:
-                    # First try to get cloud word by cloud_id (most reliable)
-                    cloud_word = self.supabase.get_word(cloud_word_id)
-                    if cloud_word:
-                        # Compare timestamps to see if cloud has newer version
-                        cloud_ts = cloud_word.get('edited_at') or cloud_word.get('created_at')
-                        local_ts = old_word_data.get('edited_at') or old_word_data.get('created_at')
-                        
-                        if cloud_ts and local_ts:
-                            comparison = self._compare_timestamps(cloud_ts, local_ts)
-                            if comparison > 0:  # Cloud is newer
-                                # Cloud has newer version - sync it to local first
-                                logging.info(f"Cloud has newer version of word {word_id}, syncing before edit")
-                                # Update local with cloud version (merge cloud changes)
-                                # Preserve local created_at if it's older (to maintain order)
-                                local_created_at = old_word_data.get('created_at')
-                                cloud_created_at = cloud_word.get('created_at')
-                                
-                                # Use cloud data but preserve local created_at if it's older
-                                merged_data = cloud_word.copy()
-                                if local_created_at and cloud_created_at:
-                                    created_comparison = self._compare_timestamps(local_created_at, cloud_created_at)
-                                    if created_comparison < 0:  # Local created_at is older
-                                        merged_data['created_at'] = local_created_at
-                                
-                                # Update local with merged cloud data (preserve cloud_id)
-                                merged_data['cloud_id'] = cloud_word_id
-                                self._update_word_sqlite(word_id, merged_data)
-                                # Update old_word_data to reflect synced version
-                                old_word_data = self._get_word_sqlite(word_id)
-                                logging.info(f"Synced word {word_id} from cloud before applying edit")
-                    else:
-                        # cloud_id exists but word not found in cloud - might have been deleted
-                        logging.warning(f"cloud_id {cloud_word_id} found but word not in cloud, clearing cloud_id")
-                        cloud_word_id = None
-                
-                # No cloud_id - fall back to content-based matching
-                if not cloud_word_id:
-                    old_language1 = old_word_data.get('Language1')
-                    old_word1 = old_word_data.get('Word1')
-                    old_language2 = old_word_data.get('Language2')
-                    old_word2 = old_word_data.get('Word2')
-                    
-                    if all([old_language1, old_word1, old_language2, old_word2]):
-                        # Find cloud word by old content
-                        cloud_word = self.supabase.find_word_by_content(old_language1, old_word1, old_language2, old_word2)
-                        if cloud_word:
-                            # Store the cloud word ID - we'll need it to update after edit
-                            cloud_word_id = cloud_word.get('ID') or cloud_word.get('id')
-                            
-                            # Compare timestamps to see if cloud has newer version
-                            cloud_ts = cloud_word.get('edited_at') or cloud_word.get('created_at')
-                            local_ts = old_word_data.get('edited_at') or old_word_data.get('created_at')
-                            
-                            if cloud_ts and local_ts:
-                                comparison = self._compare_timestamps(cloud_ts, local_ts)
-                                if comparison > 0:  # Cloud is newer
-                                    # Cloud has newer version - sync it to local first
-                                    logging.info(f"Cloud has newer version of word {word_id}, syncing before edit")
-                                    # Update local with cloud version (merge cloud changes)
-                                    local_created_at = old_word_data.get('created_at')
-                                    cloud_created_at = cloud_word.get('created_at')
-                                    
-                                    # Use cloud data but preserve local created_at if it's older
-                                    merged_data = cloud_word.copy()
-                                    if local_created_at and cloud_created_at:
-                                        created_comparison = self._compare_timestamps(local_created_at, cloud_created_at)
-                                        if created_comparison < 0:  # Local created_at is older
-                                            merged_data['created_at'] = local_created_at
-                                    
-                                    # Store cloud_id for future updates
-                                    merged_data['cloud_id'] = cloud_word_id
-                                    self._update_word_sqlite(word_id, merged_data)
-                                    # Update old_word_data to reflect synced version
-                                    old_word_data = self._get_word_sqlite(word_id)
-                                    logging.info(f"Synced word {word_id} from cloud before applying edit")
+                cloud_word = self.supabase.get_word(word_id)
+                if cloud_word:
+                    cloud_ts = cloud_word.get('edited_at') or cloud_word.get('created_at')
+                    local_ts = old_word_data.get('edited_at') or old_word_data.get('created_at')
+                    if cloud_ts and local_ts and self._compare_timestamps(cloud_ts, local_ts) > 0:
+                        logging.info(f"Cloud has newer version of word {word_id}, syncing before edit")
+                        merged_data = cloud_word.copy()
+                        # Preserve the older created_at to keep list ordering stable.
+                        lca, cca = old_word_data.get('created_at'), cloud_word.get('created_at')
+                        if lca and cca and self._compare_timestamps(lca, cca) < 0:
+                            merged_data['created_at'] = lca
+                        self._update_word_sqlite(word_id, merged_data)
             except Exception as e:
                 logging.warning(f"Error checking for cloud updates before edit: {e}")
-        
-        # Now update local with user's changes
+
+        # Apply the user's changes locally.
         local_result = self._update_word_sqlite(word_id, word_data)
-        
+
         if local_result:
-            # If cloud is available, try to sync immediately
             if self._use_cloud():
                 try:
-                    # First try to use cloud_id (most reliable)
-                    if cloud_word_id:
-                        logging.debug(f"Updating cloud word {cloud_word_id} directly (using cloud_id)")
-                        cloud_result = self.supabase.update_word(cloud_word_id, word_data)
-                        if cloud_result:
-                            # Ensure cloud_id is stored (in case it wasn't before)
-                            if not old_word_data or not old_word_data.get('cloud_id'):
-                                self._update_cloud_id_sqlite(word_id, cloud_word_id)
-                            return local_result
-                    
-                    # Fallback: Try to find cloud word using content
-                    # Use the content from old_word_data (before user's edit, after potential sync)
-                    if old_word_data:
-                        old_language1 = old_word_data.get('Language1')
-                        old_word1 = old_word_data.get('Word1')
-                        old_language2 = old_word_data.get('Language2')
-                        old_word2 = old_word_data.get('Word2')
-                        
-                        if all([old_language1, old_word1, old_language2, old_word2]):
-                            # Find cloud word by old content (before user's edit)
-                            cloud_word = self.supabase.find_word_by_content(old_language1, old_word1, old_language2, old_word2)
-                            if cloud_word:
-                                cloud_id = cloud_word.get('ID') or cloud_word.get('id')
-                                if cloud_id:
-                                    # Update the cloud word using its ID with NEW data
-                                    cloud_result = self.supabase.update_word(cloud_id, word_data)
-                                    if cloud_result:
-                                        # Store cloud_id for future updates
-                                        self._update_cloud_id_sqlite(word_id, cloud_id)
-                                        return local_result
-                                else:
-                                    logging.warning(f"Found cloud word but couldn't get ID for update {word_id}")
-                            else:
-                                # Old word not found in cloud - try by new content
-                                new_language1 = local_result.get('Language1') or word_data.get('Language1') or word_data.get('language1')
-                                new_word1 = local_result.get('Word1') or word_data.get('Word1') or word_data.get('word1')
-                                new_language2 = local_result.get('Language2') or word_data.get('Language2') or word_data.get('language2')
-                                new_word2 = local_result.get('Word2') or word_data.get('Word2') or word_data.get('word2')
-                                
-                                if all([new_language1, new_word1, new_language2, new_word2]):
-                                    cloud_word = self.supabase.find_word_by_content(new_language1, new_word1, new_language2, new_word2)
-                                    if cloud_word:
-                                        cloud_id = cloud_word.get('ID') or cloud_word.get('id')
-                                        if cloud_id:
-                                            cloud_result = self.supabase.update_word(cloud_id, word_data)
-                                            if cloud_result:
-                                                # Store cloud_id for future updates
-                                                self._update_cloud_id_sqlite(word_id, cloud_id)
-                                                return local_result
-                                
-                                # Not found by old or new content - use upsert (will insert if truly new)
-                                logging.warning(f"Word {word_id} not found in cloud by any method, using upsert (may create duplicate)")
-                                cloud_result = self.supabase.upsert_word(word_data)
-                                if cloud_result:
-                                    # Store cloud_id from result
-                                    result_cloud_id = cloud_result.get('ID') or cloud_result.get('id')
-                                    if result_cloud_id:
-                                        self._update_cloud_id_sqlite(word_id, result_cloud_id)
-                                    return local_result
-                        else:
-                            logging.warning(f"Cannot find cloud word by old content (missing fields) for update {word_id}")
+                    # Upsert by id — updates the existing cloud row, or inserts it if
+                    # it isn't there yet (first sync / created while offline).
+                    cloud_result = self.supabase.upsert_word(local_result)
+                    if cloud_result:
+                        cloud_id = cloud_result.get('ID') or cloud_result.get('id')
+                        if cloud_id and cloud_id != word_id:
+                            self._rekey_word_sqlite(word_id, cloud_id)
+                            local_result = self._get_word_sqlite(cloud_id)
                     else:
-                        logging.warning(f"Could not get old word data for {word_id} before update")
-                    
-                    # If we couldn't find by content or update failed, queue for later
-                    self._queue_operation('UPDATE', 'words', word_id, local_result)
-                    logging.warning(f"Failed to sync word {word_id} update to cloud, queued for later")
+                        self._queue_operation('UPDATE', 'words', word_id, local_result)
+                        logging.warning(f"Failed to sync word {word_id} update to cloud, queued for later")
                 except Exception as e:
-                    # Queue operation for later sync
                     self._queue_operation('UPDATE', 'words', word_id, local_result)
                     logging.warning(f"Error syncing word {word_id} update to cloud: {e}, queued for later")
             else:
-                # Cloud not available, queue for later sync
                 self._queue_operation('UPDATE', 'words', word_id, local_result)
                 logging.debug(f"Word {word_id} updated locally, will sync when cloud is available")
-        
+
         return local_result
     
     def _update_word_sqlite(self, word_id: int, word_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -906,8 +777,8 @@ class DatabaseAdapter:
         updates = []
         values = []
         
-        for key in ['Language1', 'Word1', 'Language2', 'Word2', 'Status', 'Source', 
-                   'Definition', 'Definition2', 'favorite', 'cloud_id']:
+        for key in ['Language1', 'Word1', 'Language2', 'Word2', 'Status', 'Source',
+                   'Definition', 'Definition2', 'favorite']:
             if key in word_data:
                 updates.append(f"{key} = ?")
                 values.append(word_data[key])
@@ -926,32 +797,42 @@ class DatabaseAdapter:
         conn.close()
         return self._get_word_sqlite(word_id)
     
-    def _update_cloud_id_sqlite(self, word_id: int, cloud_id: int) -> None:
-        """Update cloud_id for a word in SQLite.
-        
-        Args:
-            word_id: Local word ID
-            cloud_id: Cloud word ID to store
+    def _rekey_word_sqlite(self, old_id: str, new_id: str) -> None:
+        """Re-point a local word (and its tag links / review history) to a new id.
+
+        Used only when a push hits a cross-device content collision and the cloud
+        already holds this word pair under a different UUID: the local row adopts
+        the cloud's id so both sides converge on one identity.
         """
+        if not old_id or not new_id or old_id == new_id:
+            return
         conn = sqlite3.connect(self.local_db)
         cursor = conn.cursor()
-        
         try:
-            cursor.execute("UPDATE words SET cloud_id = ? WHERE ID = ?", (cloud_id, word_id))
+            cursor.execute("PRAGMA foreign_keys = OFF")
+            # If the target id already exists locally (both pairs present), drop the
+            # duplicate we just made rather than violating the primary key.
+            cursor.execute("SELECT 1 FROM words WHERE ID = ?", (new_id,))
+            if cursor.fetchone():
+                cursor.execute("DELETE FROM word_tags WHERE word_id = ?", (old_id,))
+                cursor.execute("DELETE FROM words WHERE ID = ?", (old_id,))
+            else:
+                cursor.execute("UPDATE words SET ID = ? WHERE ID = ?", (new_id, old_id))
+                cursor.execute("UPDATE OR IGNORE word_tags SET word_id = ? WHERE word_id = ?",
+                               (new_id, old_id))
+            cursor.execute("UPDATE review_events SET word_id = ? WHERE word_id = ?",
+                           (new_id, old_id))
             conn.commit()
-            logging.debug(f"Updated cloud_id={cloud_id} for local word {word_id}")
+            logging.info(f"Re-keyed local word {old_id} -> {new_id} (cloud collision)")
         except Exception as e:
-            logging.error(f"Error updating cloud_id for word {word_id}: {e}")
+            logging.error(f"Error re-keying word {old_id} -> {new_id}: {e}")
             conn.rollback()
         finally:
             conn.close()
     
-    def delete_word(self, word_id: int) -> bool:
-        """Delete a word. Deletes from both local and cloud if available.
-        
-        Uses cloud_id if available for reliable cloud word identification.
-        """
-        # Get word data before deleting (needed for cloud_id or content-based lookup in cloud)
+    def delete_word(self, word_id: str) -> bool:
+        """Delete a word locally and (soft-delete) in the cloud by its shared id."""
+        # Get word data before deleting (for the local Bin snapshot).
         word_data = self._get_word_sqlite(word_id)
 
         # Stash the row (and its tags) in the local Bin so it can be restored
@@ -967,56 +848,19 @@ class DatabaseAdapter:
         if local_success:
             # Track deletion for sync
             self._track_deletion('words', word_id)
-            
-            # If cloud is available, try to delete from cloud immediately
+
             if self._use_cloud():
                 try:
-                    if word_data:
-                        # First try to use cloud_id (most reliable)
-                        cloud_id = word_data.get('cloud_id')
-                        
-                        if cloud_id:
-                            # Use cloud_id directly
-                            cloud_success = self.supabase.delete_word(cloud_id)
-                            if cloud_success:
-                                # Mark deletion as synced
-                                self._mark_deletion_synced('words', word_id)
-                            else:
-                                # Queue deletion for later sync
-                                logging.warning(f"Failed to sync word {word_id} deletion to cloud using cloud_id {cloud_id}, queued for later")
-                        else:
-                            # Fallback to content-based lookup
-                            language1 = word_data.get('Language1')
-                            word1 = word_data.get('Word1')
-                            language2 = word_data.get('Language2')
-                            word2 = word_data.get('Word2')
-                            
-                            if all([language1, word1, language2, word2]):
-                                cloud_word = self.supabase.find_word_by_content(language1, word1, language2, word2)
-                                if cloud_word:
-                                    cloud_id = cloud_word.get('ID') or cloud_word.get('id')
-                                    if cloud_id:
-                                        cloud_success = self.supabase.delete_word(cloud_id)
-                                        if cloud_success:
-                                            # Mark deletion as synced
-                                            self._mark_deletion_synced('words', word_id)
-                                        else:
-                                            # Queue deletion for later sync
-                                            logging.warning(f"Failed to sync word {word_id} deletion to cloud, queued for later")
-                                else:
-                                    # Word not found in cloud, consider it already deleted
-                                    logging.debug(f"Word {word_id} not found in cloud, considering deletion synced")
-                                    self._mark_deletion_synced('words', word_id)
-                            else:
-                                logging.warning(f"Cannot find cloud word by content (missing fields), queued for later")
+                    # The cloud row shares this id — soft-delete it directly.
+                    if self.supabase.delete_word(word_id):
+                        self._mark_deletion_synced('words', word_id)
                     else:
-                        logging.warning(f"Could not get word data for {word_id} before deletion, queued for later")
+                        logging.warning(f"Failed to sync word {word_id} deletion to cloud, queued for later")
                 except Exception as e:
                     logging.warning(f"Error syncing word {word_id} deletion to cloud: {e}, queued for later")
             else:
-                # Cloud not available, deletion is tracked and will be synced later
                 logging.debug(f"Word {word_id} deleted locally, will sync when cloud is available")
-        
+
         return local_success
     
     def _delete_word_sqlite(self, word_id: int) -> bool:
@@ -1094,27 +938,11 @@ class DatabaseAdapter:
             # If cloud is available, try to sync immediately
             if self._use_cloud():
                 try:
-                    cloud_data = text_data.copy()
-                    cloud_data['ID'] = text_id
-                    
-                    # Check if text already exists in cloud (might happen during sync)
-                    existing_text = self.supabase.get_text(text_id)
-                    if existing_text:
-                        # Text exists, update it instead of inserting
-                        cloud_result = self.supabase.update_text(text_id, cloud_data)
-                        if cloud_result:
-                            return local_result
-                        else:
-                            self._queue_operation('UPDATE', 'texts', text_id, local_result)
-                            logging.warning(f"Failed to sync text {text_id} update to cloud, queued for later")
-                    else:
-                        # Text doesn't exist, insert it with preserved ID
-                        cloud_result = self.supabase.insert_text(cloud_data, preserve_id=True)
-                        if cloud_result:
-                            return local_result
-                        else:
-                            self._queue_operation('INSERT', 'texts', text_id, local_result)
-                            logging.warning(f"Failed to sync text {text_id} to cloud, queued for later")
+                    # Upsert by the shared UUID id (inserts or updates the cloud row).
+                    cloud_result = self.supabase.upsert_text(local_result)
+                    if not cloud_result:
+                        self._queue_operation('INSERT', 'texts', text_id, local_result)
+                        logging.warning(f"Failed to sync text {text_id} to cloud, queued for later")
                 except Exception as e:
                     # Queue operation for later sync
                     self._queue_operation('INSERT', 'texts', text_id, local_result)
@@ -1139,15 +967,15 @@ class DatabaseAdapter:
         category = text_data.get('Category', text_data.get('category'))
         level = text_data.get('Level', text_data.get('level'))
 
+        text_id = new_id()
         cursor.execute('''
-            INSERT INTO texts (RowNumber, Title, Text, Words, Language, Category, Level, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ''', (row_number, title, text, words, language, category, level))
-        
-        text_id = cursor.lastrowid
+            INSERT INTO texts (ID, RowNumber, Title, Text, Words, Language, Category, Level, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ''', (text_id, row_number, title, text, words, language, category, level))
+
         conn.commit()
         conn.close()
-        
+
         return self._get_text_sqlite(text_id)
     
     def update_text(self, text_id: int, text_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1158,7 +986,8 @@ class DatabaseAdapter:
             # If cloud is available, try to sync immediately
             if self._use_cloud():
                 try:
-                    cloud_result = self.supabase.update_text(text_id, text_data)
+                    # Upsert by id — updates the cloud row, or inserts it if missing.
+                    cloud_result = self.supabase.upsert_text(local_result)
                     if cloud_result:
                         return local_result
                     else:
@@ -1487,58 +1316,30 @@ class DatabaseAdapter:
         conn.close()
         return [dict(row) for row in rows]
     
-    def _ensure_word_in_cloud(self, word_id: int) -> Optional[int]:
-        """Ensure word exists in Supabase and return cloud_id.
-        
-        Checks if word has cloud_id stored. If not, or if word doesn't exist in Supabase,
-        syncs the word first. Returns cloud_id if successful, None otherwise.
-        
-        Args:
-            word_id: Local word ID
-            
-        Returns:
-            Cloud word ID if word exists in Supabase, None otherwise
+    def _ensure_word_in_cloud(self, word_id: str) -> Optional[str]:
+        """Ensure the word exists in Supabase under its shared id.
+
+        The cloud row uses the same UUID, so this just pushes the word if it isn't
+        there yet. Returns the cloud id (normally == word_id; may differ on a
+        content collision) or None on failure.
         """
         if not self._use_cloud():
             return None
-        
-        # Get word from local DB
+
         word_data = self._get_word_sqlite(word_id)
         if not word_data:
             logging.warning(f"Word {word_id} not found in local database")
             return None
-        
-        # Check if word has cloud_id stored
-        cloud_id = word_data.get('cloud_id')
-        if cloud_id:
-            # Verify word exists in Supabase
-            cloud_word = self.supabase.get_word(cloud_id)
-            if cloud_word:
-                return cloud_id
-            else:
-                # cloud_id exists but word not found in Supabase - might have been deleted
-                logging.warning(f"cloud_id {cloud_id} found but word not in Supabase, syncing word {word_id}")
-                cloud_id = None
-        
-        # No cloud_id or word not found in Supabase - sync the word
-        if not cloud_id:
-            try:
-                # Use upsert to sync word to Supabase
-                cloud_result = self.supabase.upsert_word(word_data)
-                if cloud_result:
-                    cloud_id = cloud_result.get('ID') or cloud_result.get('id')
-                    if cloud_id:
-                        # Store cloud_id for future use
-                        self._update_cloud_id_sqlite(word_id, cloud_id)
-                        logging.debug(f"Synced word {word_id} to Supabase, cloud_id={cloud_id}")
-                        return cloud_id
-                    else:
-                        logging.warning(f"Synced word {word_id} but couldn't get cloud_id")
-                else:
-                    logging.warning(f"Failed to sync word {word_id} to Supabase")
-            except Exception as e:
-                logging.error(f"Error syncing word {word_id} to Supabase: {e}")
-        
+
+        try:
+            if self.supabase.get_word(word_id):
+                return word_id
+            cloud_result = self.supabase.upsert_word(word_data)
+            if cloud_result:
+                return cloud_result.get('ID') or cloud_result.get('id') or word_id
+            logging.warning(f"Failed to sync word {word_id} to Supabase")
+        except Exception as e:
+            logging.error(f"Error syncing word {word_id} to Supabase: {e}")
         return None
     
     def add_tag_to_word(self, word_id: int, tag_name: str) -> bool:
@@ -1568,24 +1369,24 @@ class DatabaseAdapter:
         
         return local_success
     
-    def _get_or_create_tag_sqlite(self, tag_name: str) -> Optional[int]:
+    def _get_or_create_tag_sqlite(self, tag_name: str) -> Optional[str]:
         """Get tag ID or create if doesn't exist. Also syncs to cloud if available."""
         conn = sqlite3.connect(self.local_db)
         cursor = conn.cursor()
-        
+
         # Check if tag already exists
         cursor.execute("SELECT tag_id FROM tags WHERE tag_name = ?", (tag_name,))
         result = cursor.fetchone()
-        
+
         if result:
             # Tag exists, return its ID
             tag_id = result[0]
             conn.close()
             return tag_id
-        
-        # Tag doesn't exist, create it
-        cursor.execute("INSERT INTO tags (tag_name) VALUES (?)", (tag_name,))
-        tag_id = cursor.lastrowid
+
+        # Tag doesn't exist, create it with a fresh UUID shared with the cloud.
+        tag_id = new_id()
+        cursor.execute("INSERT INTO tags (tag_id, tag_name) VALUES (?, ?)", (tag_id, tag_name))
         conn.commit()
         conn.close()
         

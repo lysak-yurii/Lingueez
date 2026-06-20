@@ -52,7 +52,7 @@ from app.core.audio import stop_playback
 from app.core.backup_management import backup_database
 from app.core.database_adapter import DatabaseAdapter
 from app.core.shell_utils import suggest_filename
-from app.core.sync_manager import SyncManager
+from app.core.sync_manager import SyncManager, SyncError
 from app.core.auth_manager import get_auth_manager
 from app.core.data_management import open_words_from_excel
 from app.ui import icons, theme
@@ -243,13 +243,15 @@ class MainWindow(QMainWindow):
         load_geometry(self, "main_window")
 
         # --- backend ---
-        self.sync_enabled = get_bool(settings, "enable_sync", False)
-        # Optimistic until the first sync result confirms reachability; the Bin
-        # button tracks this so it hides when the cloud is unreachable.
-        self._cloud_connected = self.sync_enabled
-        self.db_adapter = DatabaseAdapter(use_cloud=self.sync_enabled)
-        self.sync_manager = SyncManager()
+        # Cloud sync now simply follows the login state: being signed in *is* sync
+        # on; local-only means not signed in. ``sync_enabled`` is a read-only view of
+        # that (the actual sync also needs connectivity — sync_manager.is_sync_enabled).
         self.auth = get_auth_manager()
+        # Not connected until the first sync result confirms reachability; the Bin
+        # button tracks this so it hides when the cloud is unreachable.
+        self._cloud_connected = False
+        self.db_adapter = DatabaseAdapter(use_cloud=self.auth.is_logged_in())
+        self.sync_manager = SyncManager()
 
         self.word_filter = WordFilter()
         self.df = None
@@ -353,6 +355,12 @@ class MainWindow(QMainWindow):
         from app.ui.tour import TourController
         self._tour = TourController(self)
         self._tour.maybe_start_on_launch()
+
+    @property
+    def sync_enabled(self) -> bool:
+        """Cloud sync follows the login state: signed in ⇒ sync on. Read-only —
+        there is no separate enable/disable toggle anymore."""
+        return self.auth.is_logged_in()
 
     # ------------------------------------------------------------------ UI
 
@@ -1643,6 +1651,13 @@ class MainWindow(QMainWindow):
             stop_playback()
         except Exception:
             pass
+        # Best-effort, time-bounded push of any pending edits so they aren't stranded
+        # in the active account's local queue until next launch.
+        if self.auth.is_logged_in():
+            try:
+                self.sync_manager.flush_pending(timeout_seconds=8)
+            except Exception as exc:
+                logging.warning(f"Flush on quit failed: {exc}")
         if self._hotkey_listener is not None:
             try:
                 self._hotkey_listener.stop()
@@ -2145,7 +2160,7 @@ class MainWindow(QMainWindow):
         errors = 0
         for record in records:
             try:
-                self.db_adapter.delete_word(int(record["ID"]))
+                self.db_adapter.delete_word(record["ID"])
             except Exception as exc:
                 logging.error(f"Error deleting word {record['ID']}: {exc}")
                 errors += 1
@@ -2164,7 +2179,7 @@ class MainWindow(QMainWindow):
             self._sync_before_db_operation(force=True)
             target = not all(bool(r.get("favorite")) for r in records)
             for record in records:
-                self.db_adapter.update_word(int(record["ID"]), {'favorite': target})
+                self.db_adapter.update_word(record["ID"], {'favorite': target})
             self.load_data()
             if target:
                 show_toast(self, tr("Favorites"),
@@ -2180,7 +2195,7 @@ class MainWindow(QMainWindow):
         if not records:
             return
         from app.ui.dialogs.tags import TagDialog
-        dialog = TagDialog(self, [int(r["ID"]) for r in records], self.db_adapter)
+        dialog = TagDialog(self, [r["ID"] for r in records], self.db_adapter)
         dialog.exec()
         self.update_filter_combos()
         self.refresh_display()
@@ -2199,7 +2214,7 @@ class MainWindow(QMainWindow):
         status = next((s for s in statuses if tr(s) == chosen), chosen)
         for record in records:
             try:
-                self.db_adapter.update_word(int(record["ID"]), {'Status': status})
+                self.db_adapter.update_word(record["ID"], {'Status': status})
             except Exception as exc:
                 logging.error(f"Error updating status: {exc}")
         backup_database()
@@ -2214,7 +2229,7 @@ class MainWindow(QMainWindow):
             return
         from app.ui.dialogs.definition import DefinitionDialog
         record = records[0]
-        key = int(record["ID"])
+        key = record["ID"]
         existing = self._open_dialogs.get(("def", key))
         try:
             if existing is not None and existing.isVisible():
@@ -2308,7 +2323,7 @@ class MainWindow(QMainWindow):
             get_int(self.settings, "playback_reviewing_listens", 3),
             get_int(self.settings, "playback_learning_listens", 15),
             get_int(self.settings, "playback_mastered_listens", 100))
-        self._session_status = {int(r['ID']): r.get('Status') for r in records if r.get('ID') is not None}
+        self._session_status = {r['ID']: r.get('Status') for r in records if r.get('ID') is not None}
         self.texts_page.stop_reading()  # one player at a time
         # the queue is captured; clear the selection first so its highlight
         # doesn't drown out the moving played-row highlight — and so the
@@ -2442,7 +2457,6 @@ class MainWindow(QMainWindow):
             wid = rec.get('ID')
             if wid is None:
                 return
-            wid = int(wid)
             dbq.log_review(wid, datetime.now().isoformat(timespec='seconds'))
 
             if self._promote_on_play:
@@ -2635,21 +2649,25 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------- sync
 
+    def _refresh_account_dependent_ui(self):
+        """Show/hide the cloud chrome to match the login state. Sync follows login,
+        so the sync button is visible iff signed in; the Bin additionally needs a
+        confirmed cloud connection (resolved by _update_sync_status_ui)."""
+        if self.sync_button is not None:
+            self.sync_button.setVisible(self.sync_enabled)
+        if hasattr(self, "nav_bin"):
+            self.nav_bin.setVisible(self.sync_enabled and self._cloud_connected)
+
     def _reapply_sync(self):
-        """Re-apply sync configuration live (enable_sync and/or changed Supabase
-        credentials) without an app restart: refresh both Supabase clients from
-        the current environment and show/hide the sync button. Bin visibility
-        follows the real connection state, resolved by the sync result in
-        _update_sync_status_ui."""
-        enabled = get_bool(self.settings, "enable_sync", False)
-        self.sync_enabled = enabled
-        self.db_adapter.set_use_cloud(enabled)
+        """Re-apply the Supabase client configuration live after the advanced
+        URL/key changed, without an app restart. Sync itself follows the login
+        state now, so this just refreshes the client and re-syncs when signed in."""
         try:
             self.sync_manager.supabase.reconfigure()
         except Exception as exc:
             logging.warning(f"Sync client reconfigure failed: {exc}")
-        self.sync_button.setVisible(enabled)
-        if enabled:
+        self._refresh_account_dependent_ui()
+        if self.sync_enabled:
             run_in_thread(self._run_startup_sync)
         else:
             self._cloud_connected = False
@@ -2657,13 +2675,20 @@ class MainWindow(QMainWindow):
             self._update_sync_status_ui("idle")
 
     def _restore_session_and_sync(self):
-        """Worker-thread startup task: re-establish a stored account session, then
-        point the app at that account's local DB and sync. Stays on the local-only
-        ``dictionary.db`` and fully functional when there is no session."""
+        """Worker-thread startup task: re-establish the active account's stored
+        session, then point the app at that account's local DB and sync. Stays on the
+        local-only ``dictionary.db`` and fully functional when there is no session.
+        A remembered-but-expired session surfaces a re-auth hint instead of silently
+        dropping to local-only."""
+        from app.core.auth_manager import RESTORE_NEEDS_REAUTH
+        result = None
         try:
-            self.auth.restore_session()
+            result = self.auth.restore_session()
         except Exception as exc:
             logging.warning(f"Session restore failed: {exc}")
+        if result == RESTORE_NEEDS_REAUTH:
+            self.sync_status_changed.emit(
+                "error", tr("Your session expired — sign in again (Settings → Sync)"))
         uid = self.auth.current_user_id() if self.auth.is_logged_in() else None
         # Marshal onto the GUI thread: switch_active_account touches widgets
         # (reload, possible adoption prompt) and the shared adapters.
@@ -2685,58 +2710,149 @@ class MainWindow(QMainWindow):
         except Exception:
             return False
 
-    def switch_active_account(self, uid):
-        """Point the whole app at the local DB for ``uid`` (or the local-only
-        ``dictionary.db`` when uid is None), reload the UI, and sync. Each account
-        gets its own SQLite file so words and sync state never cross accounts.
+    def _adopt_local_db_into_account(self, local_path, target_path):
+        """Make the local-only DB this account's DB and prime it for a first-time
+        bidirectional (union) sync: all local words/texts/tags upload and the
+        account's existing cloud rows merge back in. The local DB is internally
+        consistent (its word_tags reference its own ids), so adopting it wholesale
+        preserves tags/texts that a row-by-row merge would risk dropping. The
+        replaced account file is backed up first — its rows live in the cloud and
+        come back on the union sync."""
+        import shutil
+        os.makedirs('backups', exist_ok=True)
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        shutil.copy2(local_path, os.path.join('backups', f'dictionary_local_{stamp}.db'))
+        if os.path.exists(target_path):
+            shutil.copy2(target_path, os.path.join(
+                'backups', f'{os.path.basename(target_path)}.replaced_{stamp}.db'))
+            os.remove(target_path)
+        shutil.move(local_path, target_path)
+        # Reset sync bookkeeping so the union first-sync upserts everything by its
+        # UUID id (cloud also has unique(user_id, word1, word2), so no duplicates)
+        # and isn't mistaken for an already-completed incremental sync.
+        conn = sqlite3.connect(target_path)
+        try:
+            cur = conn.cursor()
+            for t in ("sync_queue", "sync_deletions", "sync_metadata"):
+                try:
+                    cur.execute(f"DELETE FROM {t}")
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
+        finally:
+            conn.close()
+        # Drop the per-account last-sync marker so the next sync is detected as a
+        # first-time (union) sync and actually pushes the adopted words — clearing
+        # the DB metadata above is not enough on its own, because _is_first_sync
+        # also consults this file. (Also remove the legacy global '.last_sync'.)
+        for marker in (f"{target_path}.last_sync", ".last_sync"):
+            try:
+                if os.path.exists(marker):
+                    os.remove(marker)
+            except OSError as exc:
+                logging.warning(f"Could not remove stale sync marker {marker}: {exc}")
 
-        On the *first* sign-in after using the app locally, offers to adopt the
-        current local-only words into the new account (otherwise the account
-        starts empty and pulls its cloud data)."""
+    def switch_active_account(self, uid):
+        """The single, guarded account transition. Points the whole app at the local
+        DB for ``uid`` (or the local-only ``dictionary.db`` when uid is None), after:
+        flushing the account being left so offline edits aren't stranded; ensuring the
+        auth session matches the target (the no-password fast-switch path); and, on the
+        *first* sign-in ever after local use, offering once to adopt the local-only
+        words. Each account keeps its own SQLite file so words and sync state never
+        cross accounts."""
         from app.core.db import (account_db_path, get_active_db_path,
                                   set_active_db_path, initialize_database, DB_PATH)
-        target = account_db_path(uid)
+        registry = self.auth.registry
+
+        # 1. Flush the account we're leaving (best-effort, bounded) before its DB is
+        #    repointed away — otherwise queued offline edits would be stranded.
         prev = get_active_db_path()
+        target = account_db_path(uid)
+        if prev != target and self.auth.is_logged_in():
+            try:
+                self.sync_manager.flush_pending()
+            except Exception as exc:
+                logging.warning(f"Pre-switch flush failed: {exc}")
+
+        # 2. Ensure the auth session matches the target account.
+        if uid:
+            if self.auth.current_user_id() != uid:
+                ok, msg = self.auth.switch_to(uid)
+                if not ok:
+                    # Stored token is stale: surface it and stay put rather than
+                    # silently showing the wrong (or empty) data.
+                    show_toast(self, tr("Account"),
+                               msg or tr("Sign in again to use this account."),
+                               "error", 6000)
+                    self.sync_status_changed.emit("error", tr("Sign in again to sync"))
+                    return
+        elif self.auth.is_logged_in():
+            self.auth.sign_out_to_local()
+
+        self.db_adapter.set_use_cloud(bool(uid))
+
+        prev = get_active_db_path()  # unchanged, re-read for clarity
         if target == prev:
-            # Already on this file (e.g. opening the account dialog while signed
-            # in). Just make sure a sync runs.
+            # Already on this file (e.g. opening the account dialog while signed in).
+            self._refresh_account_dependent_ui()
             if self.sync_enabled:
                 run_in_thread(self._run_startup_sync)
             return
 
-        # First sign-in adoption: only when leaving the local-only store for a
-        # brand-new account file that doesn't exist yet, and there's local data.
-        if (uid and prev == DB_PATH and not os.path.exists(target)
-                and self._local_db_has_data(prev)):
+        # 3. One-time import of local-only words into the first account ever signed
+        #    into — independent of whether that account's file already exists, so a
+        #    leftover/test account file can't silently skip the upload. After either
+        #    choice the local store is consumed/archived so it is never re-offered to
+        #    a second account.
+        if (uid and prev == DB_PATH and self._local_db_has_data(prev)
+                and not registry.local_import_done()):
             adopt = QMessageBox.question(
                 self, tr("Upload local words?"),
-                tr("Upload your current local words to this account? They'll become "
-                   "this account's data and sync to the cloud.\n\nChoose No to start "
-                   "this account empty and load its cloud data instead."),
+                tr("Upload your current local words to this account? They merge with "
+                   "this account's cloud data and sync up.\n\nChoose No to keep this "
+                   "account's existing data and set your local words aside (archived "
+                   "to the backups folder)."),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
-            if adopt:
-                try:
+            registry.set_local_import_done(True)
+            try:
+                if adopt:
+                    self._adopt_local_db_into_account(prev, target)
+                else:
                     import shutil
                     os.makedirs('backups', exist_ok=True)
                     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    shutil.copy2(prev, os.path.join('backups', f'dictionary_adopted_{stamp}.db'))
-                    shutil.move(prev, target)
-                except Exception as exc:
-                    logging.error(f"Could not adopt local DB into account: {exc}")
+                    shutil.copy2(prev, os.path.join('backups', f'dictionary_local_{stamp}.db'))
+                    os.remove(prev)                  # archived above; don't re-offer it
+                    if not os.path.exists(target):
+                        initialize_database(target)
+            except Exception as exc:
+                logging.error(f"Could not handle local words on first sign-in: {exc}")
+                if not os.path.exists(target):
                     initialize_database(target)
-            else:
-                initialize_database(target)
 
         if not os.path.exists(target):
             initialize_database(target)
 
-        # Repoint every data-layer holder, then refresh the UI from the new file.
+        # 4. Repoint every data-layer holder, stamp ownership on a fresh/adopted file,
+        #    then refresh the UI from the new file.
         set_active_db_path(target)
         self.db_adapter.set_local_db(target)
         self.sync_manager.set_local_db(target)
+        if uid:
+            try:
+                if not self.sync_manager.get_synced_account_id():
+                    self.sync_manager.set_synced_account_id(uid)
+            except Exception as exc:
+                logging.warning(f"Could not stamp account owner: {exc}")
+        self._refresh_account_dependent_ui()
         self.reload_requested.emit()
         if self.sync_enabled:
             run_in_thread(self._run_startup_sync)
+        else:
+            self._cloud_connected = False
+            if hasattr(self, "nav_bin"):
+                self.nav_bin.setVisible(False)
+            self._update_sync_status_ui("idle")
 
     def _run_startup_sync(self):
         try:
@@ -2752,6 +2868,11 @@ class MainWindow(QMainWindow):
             self.reload_requested.emit()
         except RuntimeError:
             pass  # app shut down mid-sync; nothing to report
+        except SyncError as exc:
+            # A real data problem (e.g. a partial upload) — show the actual reason
+            # instead of the misleading "check internet" message.
+            logging.error(f"Sync incomplete: {exc}")
+            self.sync_status_changed.emit("error", tr("Sync incomplete: {reason}").format(reason=str(exc)))
         except Exception as exc:
             logging.error(f"Sync failed: {exc}")
             self.sync_status_changed.emit("error", "Sync failed: check internet or credentials")
@@ -2809,7 +2930,9 @@ class MainWindow(QMainWindow):
             try:
                 if self.sync_manager.db_adapter.is_sync_lock_held():
                     return False
-                conn = sqlite3.connect('dictionary.db')
+                from app.core.db import get_active_db_path
+                active_db = get_active_db_path()
+                conn = sqlite3.connect(active_db)
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*), MAX(edited_at) FROM words")
                 before = cursor.fetchone()
@@ -2818,7 +2941,7 @@ class MainWindow(QMainWindow):
                 if not self.sync_manager.quick_pull_words():
                     return False
 
-                conn = sqlite3.connect('dictionary.db')
+                conn = sqlite3.connect(active_db)
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*), MAX(edited_at) FROM words")
                 after = cursor.fetchone()

@@ -44,6 +44,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from app.core.accounts import get_account_registry
 from app.core.secure_store import SecureStore
 from app.core.supabase_client import get_supabase
 
@@ -53,6 +54,11 @@ LOOPBACK_PORT = 53682
 LOOPBACK_REDIRECT = f"http://127.0.0.1:{LOOPBACK_PORT}"
 
 Result = Tuple[bool, Optional[str]]
+
+# restore_session outcomes
+RESTORE_OK = "ok"               # a valid session was re-established
+RESTORE_NONE = "none"           # nothing remembered — stay local-only
+RESTORE_NEEDS_REAUTH = "reauth"  # an account is remembered but its token is stale
 
 
 class _OAuthCatcher(HTTPServer):
@@ -95,6 +101,7 @@ class AuthManager:
     def __init__(self, supabase=None):
         self.sb = supabase or get_supabase()
         self.store = SecureStore()
+        self.registry = get_account_registry()
         self._session = None
         self._user = None
 
@@ -260,42 +267,116 @@ class AuthManager:
             except Exception:
                 pass
 
-    # ---- sign out ------------------------------------------------------
-    def sign_out(self) -> Result:
-        auth = self.sb.get_auth()
-        try:
-            if auth is not None:
-                auth.sign_out()
-        except Exception as exc:
-            logging.info(f"Remote sign-out failed (clearing local session anyway): {exc}")
+    # ---- leaving / removing accounts ----------------------------------
+    def sign_out_to_local(self) -> Result:
+        """Leave the active account and go local-only, but keep it *remembered*
+        so it can be switched back to without re-entering the password. The refresh
+        token is intentionally not revoked server-side (that's ``forget_account``)."""
         self._session = None
         self._user = None
-        self.store.clear()
         self.sb.set_auth_token(None)  # revert PostgREST to the anon key
+        self.registry.set_active(None)
+        return True, None
+
+    def forget_account(self, uid: str) -> Result:
+        """Remove an account from this device: delete its stored token and registry
+        entry. If it is the active session, revoke it remotely (best effort) and
+        drop to local-only."""
+        if uid and uid == self.current_user_id():
+            auth = self.sb.get_auth()
+            try:
+                if auth is not None:
+                    auth.sign_out()
+            except Exception as exc:
+                logging.info(f"Remote sign-out failed (clearing locally anyway): {exc}")
+            self._session = None
+            self._user = None
+            self.sb.set_auth_token(None)
+        self.store.clear(uid)
+        self.registry.remove(uid)
         return True, None
 
     # ---- session lifecycle --------------------------------------------
-    def restore_session(self) -> bool:
-        """Re-establish a saved session on startup. Returns True if a valid
-        session was restored (refreshing it if the access token had expired)."""
+    def restore_session(self) -> str:
+        """Re-establish the active account's saved session on startup. Returns one
+        of ``RESTORE_OK`` / ``RESTORE_NONE`` / ``RESTORE_NEEDS_REAUTH`` so the UI can
+        tell "nothing to restore" apart from "an account is remembered but its token
+        expired" (which deserves a visible prompt rather than a silent drop to
+        local-only)."""
         auth = self.sb.get_auth()
         if auth is None:
-            return False
-        data = self.store.load()
+            return RESTORE_NONE
+        if self._migrate_legacy_session():
+            return RESTORE_OK
+        uid = self.registry.get_active()
+        if not uid:
+            return RESTORE_NONE
+        data = self.store.load(uid)
         if not data or not data.get("refresh_token"):
-            return False
+            self.registry.mark_needs_reauth(uid, True)
+            return RESTORE_NEEDS_REAUTH
         try:
             res = auth.set_session(data.get("access_token") or "", data["refresh_token"])
         except Exception as exc:
-            logging.info(f"Stored session is no longer valid ({exc}); signing out locally.")
-            self.store.clear()
-            self.sb.set_auth_token(None)
-            return False
+            logging.info(f"Stored session for active account is no longer valid ({exc}).")
+            self.registry.mark_needs_reauth(uid, True)
+            return RESTORE_NEEDS_REAUTH
         if not getattr(res, "session", None):
-            self.store.clear()
-            return False
+            self.registry.mark_needs_reauth(uid, True)
+            return RESTORE_NEEDS_REAUTH
         self._on_session(res.session)
         logging.info("Restored Supabase session for %s", self.current_user())
+        return RESTORE_OK
+
+    def switch_to(self, uid: str) -> Result:
+        """Activate a remembered account from its stored session — the no-password
+        fast-switch path. Marks the account as needing re-auth (and reports it) when
+        the stored token is gone or stale."""
+        auth = self.sb.get_auth()
+        if auth is None:
+            return False, self._not_configured()
+        data = self.store.load(uid)
+        stale_msg = "Your saved sign-in for this account expired. Sign in again."
+        if not data or not data.get("refresh_token"):
+            self.registry.mark_needs_reauth(uid, True)
+            return False, stale_msg
+        try:
+            res = auth.set_session(data.get("access_token") or "", data["refresh_token"])
+        except Exception as exc:
+            logging.info(f"Stored session for {uid} is no longer valid ({exc}).")
+            self.registry.mark_needs_reauth(uid, True)
+            return False, stale_msg
+        if not getattr(res, "session", None):
+            self.registry.mark_needs_reauth(uid, True)
+            return False, stale_msg
+        self._on_session(res.session)
+        return True, None
+
+    def _migrate_legacy_session(self) -> bool:
+        """One-time upgrade: fold a pre-multi-account single-slot session into the
+        uid-keyed store + registry so existing installs stay signed in. Returns True
+        when it migrated *and* left the user logged in."""
+        if self.registry.get_active():
+            return False  # already on the multi-account model
+        legacy = self.store.load_legacy()
+        if not legacy or not legacy.get("refresh_token"):
+            return False
+        auth = self.sb.get_auth()
+        if auth is None:
+            return False
+        try:
+            res = auth.set_session(legacy.get("access_token") or "", legacy["refresh_token"])
+            session = getattr(res, "session", None)
+        except Exception as exc:
+            logging.info(f"Could not migrate legacy session ({exc}); discarding it.")
+            self.store.clear_legacy()
+            return False
+        if session is None:
+            self.store.clear_legacy()
+            return False
+        self._on_session(session)   # saves under the uid + marks it active
+        self.store.clear_legacy()
+        logging.info("Migrated legacy session to per-account store for %s", self.current_user())
         return True
 
     def refresh_if_needed(self) -> None:
@@ -318,11 +399,17 @@ class AuthManager:
         self._session = session
         self._user = getattr(session, "user", None)
         self.sb.set_auth_token(session.access_token)
+        uid = self.current_user_id()
+        if not uid:
+            return
         try:
-            self.store.save({
+            self.store.save(uid, {
                 "access_token": session.access_token,
                 "refresh_token": session.refresh_token,
             })
+            self.registry.upsert(uid, self.current_user())
+            self.registry.set_active(uid)
+            self.registry.mark_needs_reauth(uid, False)
         except Exception as exc:
             logging.warning(f"Could not persist session: {exc}")
 

@@ -77,7 +77,7 @@ LIST_MIN_HEIGHT = 180
 class AddTextDialog(FramelessDialog):
     """Collect a text from any source and save it to the texts table."""
 
-    text_saved = Signal(int)  # ID of the newly inserted text
+    text_saved = Signal(str)  # UUID of the newly inserted text
 
     def __init__(self, parent, db_adapter, initial_tab=TAB_WRITE):
         super().__init__(parent, tr("Add Text"))
@@ -608,7 +608,7 @@ class AddTextDialog(FramelessDialog):
         settings["addtext_level"] = level
         save_settings(settings)
 
-        self.text_saved.emit(int(result['ID']))
+        self.text_saved.emit(str(result['ID']))
         show_toast(self, tr("Texts"),
                    tr("'{title}' saved.").format(title=title or tr("(untitled)")),
                    "success")

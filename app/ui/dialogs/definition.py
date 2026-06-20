@@ -60,7 +60,7 @@ class DefinitionDialog(FramelessDialog):
         super().__init__(parent, title=tr("Definition — {word}").format(word=record.get('Word1', '')))
         self.record = record
         self.db_adapter = db_adapter
-        self.word_id = int(record["ID"])
+        self.word_id = record["ID"]
         self.current_field = 'Word1'   # which word's definition is shown
         self._pick_initial_field = True  # on first load, open the side that has a definition
         self.editing = False

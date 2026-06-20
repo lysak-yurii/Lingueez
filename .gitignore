@@ -13,13 +13,14 @@ venv/
 # Secrets & local config
 .env
 settings.cfg
+accounts.json
 
 # Runtime files
 app.log
 crash.log
 app.lock
 window_geometry.json
-.last_sync
+*.last_sync
 .last_cleanup
 .last_update_check
 
