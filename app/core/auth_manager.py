@@ -54,6 +54,11 @@ from app.i18n import tr
 LOOPBACK_PORT = 53682
 LOOPBACK_REDIRECT = f"http://127.0.0.1:{LOOPBACK_PORT}"
 
+# How many distinct accounts may be remembered on one device at once. Signing back
+# into an already-remembered account is always allowed; only adding a new one beyond
+# this is blocked.
+MAX_ACCOUNTS = 5
+
 Result = Tuple[bool, Optional[str]]
 
 # restore_session outcomes
@@ -141,13 +146,19 @@ class AuthManager:
             return False, self._friendly(exc)
         if not getattr(res, "session", None):
             return False, tr("Sign-in failed. Check your email and password.")
-        self._on_session(res.session)
+        if not self._on_session(res.session):
+            return False, self._account_limit_msg()
         return True, None
 
     def sign_up(self, email: str, password: str, name: str = "") -> Result:
         auth = self.sb.get_auth()
         if auth is None:
             return False, self._not_configured()
+        # New account — refuse early (before emailing a code) if the device is full.
+        accts = self.registry.list_accounts()
+        if len(accts) >= MAX_ACCOUNTS and email.strip().lower() not in {
+                (a.get("email") or "").lower() for a in accts}:
+            return False, self._account_limit_msg()
         try:
             credentials = {"email": email.strip(), "password": password}
             name = (name or "").strip()
@@ -162,7 +173,8 @@ class AuthManager:
             return False, self._friendly(exc)
         if getattr(res, "session", None):
             # Email confirmation disabled on the project — straight in.
-            self._on_session(res.session)
+            if not self._on_session(res.session):
+                return False, self._account_limit_msg()
             return True, None
         # No session. Tell two cases apart:
         #  • Duplicate sign-up. To resist email enumeration, GoTrue doesn't error on
@@ -192,7 +204,8 @@ class AuthManager:
             return False, self._friendly(exc)
         if not getattr(res, "session", None):
             return False, tr("That code didn't work. Check it and try again.")
-        self._on_session(res.session)
+        if not self._on_session(res.session):
+            return False, self._account_limit_msg()
         return True, None
 
     def reset_password(self, email: str) -> Result:
@@ -224,7 +237,8 @@ class AuthManager:
         if not getattr(res, "session", None):
             return False, tr("That code didn't work. Check it and try again.")
         # The recovery session lets us set a new password for this account.
-        self._on_session(res.session)
+        if not self._on_session(res.session):
+            return False, self._account_limit_msg()
         try:
             auth.update_user({"password": new_password})
         except Exception as exc:
@@ -282,7 +296,8 @@ class AuthManager:
                 return False, self._friendly(exc)
             if not getattr(res, "session", None):
                 return False, tr("Google sign-in failed.")
-            self._on_session(res.session)
+            if not self._on_session(res.session):
+                return False, self._account_limit_msg()
             return True, None
         finally:
             try:
@@ -418,13 +433,29 @@ class AuthManager:
             logging.warning(f"Token refresh failed: {exc}")
 
     # ---- internals -----------------------------------------------------
-    def _on_session(self, session) -> None:
-        self._session = session
-        self._user = getattr(session, "user", None)
-        self.sb.set_auth_token(session.access_token)
-        uid = self.current_user_id()
+    def _account_limit_reached(self, uid: str) -> bool:
+        """True when adopting *uid* would exceed MAX_ACCOUNTS. Re-authing an account
+        that's already remembered never counts."""
+        existing = {a["uid"] for a in self.registry.list_accounts()}
+        return uid not in existing and len(existing) >= MAX_ACCOUNTS
+
+    @staticmethod
+    def _account_limit_msg() -> str:
+        return tr("You can keep up to {max} accounts on this device. Remove one to "
+                  "add another.").format(max=MAX_ACCOUNTS)
+
+    def _on_session(self, session) -> bool:
+        """Adopt a freshly established session. Returns False (adopting nothing) when
+        it would push past the per-device account cap with a brand-new account."""
+        user = getattr(session, "user", None)
+        uid = getattr(user, "id", None)
         if not uid:
-            return
+            return False
+        if self._account_limit_reached(uid):
+            return False
+        self._session = session
+        self._user = user
+        self.sb.set_auth_token(session.access_token)
         try:
             self.store.save(uid, {
                 "access_token": session.access_token,
@@ -438,6 +469,7 @@ class AuthManager:
             self.registry.mark_needs_reauth(uid, False)
         except Exception as exc:
             logging.warning(f"Could not persist session: {exc}")
+        return True
 
     @staticmethod
     def _friendly(exc: Exception) -> str:

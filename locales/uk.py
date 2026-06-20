@@ -283,6 +283,7 @@ TRANSLATIONS: dict[str, str] = {
     "Upload your current local words to this account? They merge with this account's cloud data and sync up.\n\nChoose No to keep this account's existing data and set your local words aside (archived to the backups folder).": "Вивантажити ваші поточні локальні слова до цього облікового запису? Вони об'єднаються з хмарними даними цього облікового запису та синхронізуються.\n\nОберіть «Ні», щоб залишити наявні дані цього облікового запису, а локальні слова відкласти (заархівувати до теки резервних копій).",
     # ── Auth status & error messages (auth_manager) ──────────────────────
     "Sign-in failed. Check your email and password.": "Не вдалося увійти. Перевірте електронну пошту та пароль.",
+    "You can keep up to {max} accounts on this device. Remove one to add another.": "На цьому пристрої можна зберігати щонайбільше {max} облікових записів. Видаліть один, щоб додати інший.",
     "Wrong email or password.": "Неправильна електронна пошта або пароль.",
     "That doesn't look like a valid email address.": "Це не схоже на дійсну електронну адресу.",
     "Confirm password": "Підтвердіть пароль",
