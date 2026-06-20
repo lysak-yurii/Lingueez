@@ -424,6 +424,8 @@ class AuthManager:
         low = raw.lower()
         if "invalid login credentials" in low:
             return tr("Wrong email or password.")
+        if "unable to validate email address" in low or "invalid format" in low:
+            return tr("That doesn't look like a valid email address.")
         if "email not confirmed" in low:
             return tr("Your email isn't confirmed yet. Enter the 6-digit code we emailed you.")
         if "already registered" in low or "already been registered" in low:

@@ -243,6 +243,9 @@ TRANSLATIONS: dict[str, str] = {
     # ── Auth status & error messages (auth_manager) ──────────────────────
     "Sign-in failed. Check your email and password.": "Не вдалося увійти. Перевірте електронну пошту та пароль.",
     "Wrong email or password.": "Неправильна електронна пошта або пароль.",
+    "That doesn't look like a valid email address.": "Це не схоже на дійсну електронну адресу.",
+    "Confirm password": "Підтвердіть пароль",
+    "Passwords don't match.": "Паролі не збігаються.",
     "Your email isn't confirmed yet. Enter the 6-digit code we emailed you.": "Вашу електронну пошту ще не підтверджено. Введіть 6-значний код, який ми надіслали на пошту.",
     "That email is already registered. Try signing in instead.": "Ця електронна пошта вже зареєстрована. Спробуйте увійти.",
     "We emailed you a 6-digit code. Enter it to finish signing up.": "Ми надіслали вам 6-значний код на пошту. Введіть його, щоб завершити реєстрацію.",
