@@ -161,7 +161,8 @@ class AuthManager:
             return False, self._account_limit_msg()
         try:
             credentials = {"email": email.strip(), "password": password}
-            name = (name or "").strip()
+            # Store the display name capitalized (each word: "yurii lysak" -> "Yurii Lysak").
+            name = (name or "").strip().title()
             if name:
                 # Stored as user_metadata; `display_name` is what the Supabase
                 # dashboard shows (matching how a Google account's name appears),
