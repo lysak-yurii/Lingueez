@@ -141,6 +141,12 @@ TRANSLATIONS: dict[str, str] = {
     "Audio": "Аудіо",
     "Learning": "Вивчається",
     "Listening": "Прослуховування",
+    "General": "Загальні",
+    "Read-aloud": "Озвучення",
+    "Translation & AI": "Переклад та ШІ",
+    "Data": "Дані",
+    "Behavior": "Поведінка",
+    "Progress": "Прогрес",
     "DeepL request failed — using free Google Translate instead.": "Запит до DeepL не вдався — використовується безкоштовний Google Перекладач.",
     "DeepL key isn't set — using free Google Translate instead.": "Ключ DeepL не вказано — використовується безкоштовний Google Перекладач.",
     "System": "Система",
@@ -396,7 +402,7 @@ TRANSLATIONS: dict[str, str] = {
     "No definition stored yet. Use \"Generate with AI\" or \"Edit\" to add one.": "Визначення ще не додано. Використайте «Згенерувати за допомогою ШІ» або «Редагувати».",
     "There is no word to define.": "Немає слова для визначення.",
     "API key missing": "Відсутній ключ API",
-    "Set your {ai} API key in Settings → APIs → AI first.": "Спочатку вкажіть ключ {ai} у Налаштуваннях → APIs → AI.",
+    "Set your {ai} API key in Settings → Translation & AI → AI first.": "Спочатку вкажіть ключ {ai} у Налаштуваннях → Переклад та ШІ → ШІ.",
     "Generating definition…": "Генерується визначення…",
 
     # ── tags.py ────────────────────────────────────────────────────────────
@@ -700,8 +706,8 @@ TRANSLATIONS: dict[str, str] = {
     "Double-click an entry to load its full text.": "Двічі клацніть на записі, щоб завантажити повний текст.",
     "Working…": "Обробляється…",
     "Show the {count} result(s) again": "Показати {count} результат(ів) знову",
-    "{ai} API key is not set. Configure it in Settings → APIs → AI.": (
-        "Ключ API {ai} не вказано. Налаштуйте його у Налаштуваннях → APIs → AI."
+    "{ai} API key is not set. Configure it in Settings → Translation & AI → AI.": (
+        "Ключ API {ai} не вказано. Налаштуйте його у Налаштуваннях → Переклад та ШІ → ШІ."
     ),
     "Generating with {ai}…": "Генерується з {ai}…",
     'Fetching "{title}"…': "Завантажується «{title}»…",
@@ -868,8 +874,8 @@ TRANSLATIONS: dict[str, str] = {
     "TXT file saved to {path}": "TXT-файл збережено: {path}",
     "Template saved to {path}": "Шаблон збережено: {path}",
     "{format} file saved to {path}": "Файл {format} збережено: {path}",
-    "Using gTTS instead — {problem}\nFix it in Settings → Audio.": (
-        "Використовується gTTS — {problem}\nВиправте це в Налаштуваннях → Аудіо."
+    "Using gTTS instead — {problem}\nFix it in Settings → Read-aloud → Audio.": (
+        "Використовується gTTS — {problem}\nВиправте це в Налаштуваннях → Озвучення → Аудіо."
     ),
     "Failed to load the database:": "Не вдалося завантажити базу даних:",
     "{selected} of {total} selected": "{selected} із {total} вибрано",
@@ -1285,28 +1291,28 @@ TRANSLATIONS: dict[str, str] = {
         "думки. Це був спокійний і щасливий ранок, який вона любила найбільше.",
     "Demo": "Демо",
     # --- AI provider error messages ---
-    "Invalid OpenAI API key. Check it in Settings → APIs → AI → OpenAI.":
-        "Недійсний ключ OpenAI API. Перевірте його в Налаштування → API → ШІ → OpenAI.",
+    "Invalid OpenAI API key. Check it in Settings → Translation & AI → AI → OpenAI.":
+        "Недійсний ключ OpenAI API. Перевірте його в Налаштування → Переклад та ШІ → ШІ → OpenAI.",
     "Your OpenAI account is out of credits. Add credits at "
     "platform.openai.com/account/billing, or switch the AI "
-    "provider to Gemini in Settings → APIs → AI.":
+    "provider to Gemini in Settings → Translation & AI → AI.":
         "На вашому акаунті OpenAI закінчилися кошти. Поповніть на "
         "platform.openai.com/account/billing або змініть постачальника ШІ "
-        "на Gemini в Налаштування → API → ШІ.",
+        "на Gemini в Налаштування → Переклад та ШІ → ШІ.",
     "OpenAI rate limit reached. Wait a moment and try again.":
         "Перевищено ліміт запитів OpenAI. Зачекайте трохи й спробуйте ще раз.",
-    "Unknown OpenAI model. Check the model name in Settings → APIs → AI → OpenAI.":
-        "Невідома модель OpenAI. Перевірте назву моделі в Налаштування → API → ШІ → OpenAI.",
+    "Unknown OpenAI model. Check the model name in Settings → Translation & AI → AI → OpenAI.":
+        "Невідома модель OpenAI. Перевірте назву моделі в Налаштування → Переклад та ШІ → ШІ → OpenAI.",
     "Could not reach OpenAI. Check your internet connection.":
         "Не вдалося з'єднатися з OpenAI. Перевірте підключення до Інтернету.",
     "Gemini quota exhausted. The free tier resets daily; wait, "
     "or create a new key at aistudio.google.com/app/apikey.":
         "Квоту Gemini вичерпано. Безкоштовний рівень оновлюється щодня; зачекайте "
         "або створіть новий ключ на aistudio.google.com/app/apikey.",
-    "Invalid Google API key. Check it in Settings → APIs → AI → Gemini.":
-        "Недійсний ключ Google API. Перевірте його в Налаштування → API → ШІ → Gemini.",
-    "Unknown Gemini model. Check the model name in Settings → APIs → AI → Gemini.":
-        "Невідома модель Gemini. Перевірте назву моделі в Налаштування → API → ШІ → Gemini.",
+    "Invalid Google API key. Check it in Settings → Translation & AI → AI → Gemini.":
+        "Недійсний ключ Google API. Перевірте його в Налаштування → Переклад та ШІ → ШІ → Gemini.",
+    "Unknown Gemini model. Check the model name in Settings → Translation & AI → AI → Gemini.":
+        "Невідома модель Gemini. Перевірте назву моделі в Налаштування → Переклад та ШІ → ШІ → Gemini.",
     # --- Words empty state ---
     "Your vocabulary journey starts here": "Ваша словникова подорож починається тут",
     "Add your first word — its translation can be fetched automatically.":

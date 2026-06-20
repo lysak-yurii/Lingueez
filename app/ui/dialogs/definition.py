@@ -205,7 +205,7 @@ class DefinitionDialog(FramelessDialog):
             return
         if not ai.has_api_key():
             QMessageBox.warning(self, tr("API key missing"),
-                                tr("Set your {ai} API key in Settings → APIs → AI first.").format(ai=self.ai_label))
+                                tr("Set your {ai} API key in Settings → Translation & AI → AI first.").format(ai=self.ai_label))
             return
         lang1 = self.word.get('Language1') or "English"
         lang2 = self.word.get('Language2') or "English"

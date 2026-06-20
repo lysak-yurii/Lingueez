@@ -79,7 +79,7 @@ class _Provider:
         key = self.api_key()
         if not key:
             raise AIError(f"{self.label} API key is not set. "
-                          f"Configure it in Settings → APIs → AI.")
+                          f"Configure it in Settings → Translation & AI → AI.")
         with self._lock:
             if self._client is None or self._client_key != key:
                 self._client = self._make_client(key)
@@ -90,7 +90,7 @@ class _Provider:
         """Run one prompt; returns non-empty text or raises AIError."""
         if not model:
             raise AIError(f"No {self.label} model configured. "
-                          f"Set one in Settings → APIs → AI.")
+                          f"Set one in Settings → Translation & AI → AI.")
         try:
             text = self._complete(prompt, model, max_tokens, temperature, role)
         except AIError:
@@ -138,16 +138,16 @@ class _OpenAIProvider(_Provider):
         import openai
         if isinstance(exc, openai.AuthenticationError):
             return tr("Invalid OpenAI API key. "
-                      "Check it in Settings → APIs → AI → OpenAI.")
+                      "Check it in Settings → Translation & AI → AI → OpenAI.")
         if isinstance(exc, openai.RateLimitError):
             if "insufficient_quota" in str(exc):
                 return tr("Your OpenAI account is out of credits. Add credits at "
                           "platform.openai.com/account/billing, or switch the AI "
-                          "provider to Gemini in Settings → APIs → AI.")
+                          "provider to Gemini in Settings → Translation & AI → AI.")
             return tr("OpenAI rate limit reached. Wait a moment and try again.")
         if isinstance(exc, openai.NotFoundError):
             return tr("Unknown OpenAI model. "
-                      "Check the model name in Settings → APIs → AI → OpenAI.")
+                      "Check the model name in Settings → Translation & AI → AI → OpenAI.")
         if isinstance(exc, openai.APIConnectionError):
             return tr("Could not reach OpenAI. Check your internet connection.")
         return f"OpenAI error: {exc}"
@@ -190,10 +190,10 @@ class _GeminiProvider(_Provider):
                           "or create a new key at aistudio.google.com/app/apikey.")
             if exc.code in (401, 403):
                 return tr("Invalid Google API key. "
-                          "Check it in Settings → APIs → AI → Gemini.")
+                          "Check it in Settings → Translation & AI → AI → Gemini.")
             if exc.code == 404:
                 return tr("Unknown Gemini model. "
-                          "Check the model name in Settings → APIs → AI → Gemini.")
+                          "Check the model name in Settings → Translation & AI → AI → Gemini.")
             return f"Gemini error {exc.code}: {exc.message}"
         return f"Gemini error: {exc}"
 
@@ -240,12 +240,12 @@ def _task_params(settings, provider, task=""):
 def _render(template, **values):
     if not template.strip():
         raise AIError("The prompt template is empty. "
-                      "Fix it in Settings → APIs → AI.")
+                      "Fix it in Settings → Translation & AI → AI.")
     try:
         return template.format(**values)
     except (KeyError, IndexError, ValueError) as exc:
         raise AIError(f"Invalid prompt template ({exc}). "
-                      f"Fix it in Settings → APIs → AI.")
+                      f"Fix it in Settings → Translation & AI → AI.")
 
 
 def get_definition(word, language1, language2):

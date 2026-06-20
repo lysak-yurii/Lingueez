@@ -134,7 +134,7 @@ def export_to_excel_file(rows, file_path, settings, db_path='dictionary.db'):
     headers, data, included = _rows_to_table(rows, exclude_columns, db_path)
     if not included:
         raise ValueError("No columns selected for export — enable at least one column "
-                         "in Settings → Export → Excel / CSV.")
+                         "in Settings → Data → Export → Excel / CSV.")
     df = pd.DataFrame(data, columns=headers)
 
     with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
@@ -165,7 +165,7 @@ def export_to_csv_file(rows, file_path, settings, db_path='dictionary.db'):
     headers, data, included = _rows_to_table(rows, exclude_columns, db_path)
     if not included:
         raise ValueError("No columns selected for export — enable at least one column "
-                         "in Settings → Export → Excel / CSV.")
+                         "in Settings → Data → Export → Excel / CSV.")
     pd.DataFrame(data, columns=headers).to_csv(file_path, sep=delimiter, index=False)
 
 
@@ -179,7 +179,7 @@ def export_to_txt_file(rows, file_path, settings, db_path='dictionary.db'):
     _, data, included = _rows_to_table(rows, exclude_columns, db_path)
     if not included:
         raise ValueError("No columns selected for export — enable at least one column "
-                         "in Settings → Export → TXT.")
+                         "in Settings → Data → Export → TXT.")
 
     with open(file_path, 'w', encoding='utf-8') as txt_file:
         if include_headers:
@@ -220,7 +220,7 @@ def export_to_pdf_file(rows, file_path, settings, db_path='dictionary.db'):
 
     if not included:
         raise ValueError("No columns selected for PDF export — enable at least one column "
-                         "in Settings → Export → PDF.")
+                         "in Settings → Data → Export → PDF.")
 
     weights = [get_float(settings, f"pdf_col_width_{c}", PDF_WIDTH_DEFAULTS[c]) for c in included]
     if get_bool(settings, "pdf_auto_widths", True):

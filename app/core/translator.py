@@ -24,7 +24,7 @@
 Two providers are supported:
 
 * **Google Translate** (free, no API key) — the default.
-* **DeepL** (paid API key) — opt-in via Settings → Translation.
+* **DeepL** (paid API key) — opt-in via Settings → Translation & AI → Translation.
 
 When DeepL is selected but a request fails, the translation transparently
 falls back to Google so the user still gets a result. The first such fallback
@@ -185,7 +185,7 @@ def _translate_deepl(word, target_language, source_language, settings):
     api_key = settings.get("api_key", "")
     api_url = settings.get("api_url", "https://api.deepl.com/v2/translate")
     if not api_key or api_key == "YOUR_DEEPL_API_KEY_HERE":
-        raise TranslationError("DeepL API key is not set. Configure it in Settings → Translation.")
+        raise TranslationError("DeepL API key is not set. Configure it in Settings → Translation & AI → Translation.")
 
     # DeepL dropped form-body auth_key in November 2025 — the key must be
     # sent as an Authorization header.

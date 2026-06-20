@@ -89,14 +89,14 @@ class SettingsDialog(FramelessDialog):
         layout = self.content_layout
         layout.setContentsMargins(16, 16, 16, 12)
 
+        # Five task-based top-level tabs; related settings are grouped under each
+        # (e.g. Read-aloud holds both the voice/playback and the progress thresholds).
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._appearance_tab(), tr("Appearance"))
-        self.tabs.addTab(self._audio_tab(), tr("Audio"))
-        self.tabs.addTab(self._learning_tab(), tr("Listening"))
-        self.tabs.addTab(self._export_tab(), tr("Export"))
-        self.tabs.addTab(self._import_tab(), tr("Import"))
-        self.tabs.addTab(self._apis_tab(), tr("APIs"))
-        self.tabs.addTab(self._system_tab(), tr("System"))
+        self.tabs.addTab(self._general_tab(), tr("General"))
+        self.tabs.addTab(self._read_aloud_tab(), tr("Read-aloud"))
+        self.tabs.addTab(self._apis_tab(), tr("Translation & AI"))
+        self.tabs.addTab(self._data_tab(), tr("Data"))
+        self.tabs.addTab(self._sync_tab(), tr("Sync"))
         layout.addWidget(self.tabs, 1)
 
         btn_row = QHBoxLayout()
@@ -213,6 +213,28 @@ class SettingsDialog(FramelessDialog):
         return _scrollable(page)
 
     # -------------------------------------------------------------- tabs
+
+    def _general_tab(self):
+        """Look & feel + app behavior (startup, hotkey, updates)."""
+        tabs = QTabWidget()
+        tabs.addTab(self._appearance_tab(), tr("Appearance"))
+        tabs.addTab(self._system_tab(), tr("Behavior"))
+        return tabs
+
+    def _read_aloud_tab(self):
+        """Everything about Read-aloud: the voice/playback and the listening-driven
+        status progression."""
+        tabs = QTabWidget()
+        tabs.addTab(self._audio_tab(), tr("Audio"))
+        tabs.addTab(self._learning_tab(), tr("Progress"))
+        return tabs
+
+    def _data_tab(self):
+        """Getting words in and out: import + the export formats."""
+        tabs = QTabWidget()
+        tabs.addTab(self._import_tab(), tr("Import"))
+        tabs.addTab(self._export_tab(), tr("Export"))
+        return tabs
 
     def _appearance_tab(self):
         from app.ui.theme import TABLE_DENSITY, TABLE_DENSITY_DEFAULT
@@ -582,7 +604,9 @@ class SettingsDialog(FramelessDialog):
         ai_layout.addWidget(ai_tabs, 1)
         tabs.addTab(ai_w, tr("AI"))
 
-        # Sync
+        return tabs
+
+    def _sync_tab(self):
         sync = QWidget()
         form = QFormLayout(sync)
         form.setContentsMargins(18, 18, 18, 18)
@@ -684,9 +708,7 @@ class SettingsDialog(FramelessDialog):
 
             form.addRow(group)
 
-        tabs.addTab(_scrollable(sync), tr("Sync"))
-
-        return tabs
+        return _scrollable(sync)
 
     def _sync_status_label(self):
         """Plain-language 'what's happening with my data' line (dot + sentence) shown

@@ -83,7 +83,7 @@ class GenerateTextDialog(FramelessDialog):
 
         if not ai.has_api_key():
             self.text_edit.setPlaceholderText(
-                tr("{ai} API key is not set. Configure it in Settings → APIs → AI.").format(ai=self.ai_label))
+                tr("{ai} API key is not set. Configure it in Settings → Translation & AI → AI.").format(ai=self.ai_label))
             self.generate_btn.setEnabled(False)
         else:
             self.generate()

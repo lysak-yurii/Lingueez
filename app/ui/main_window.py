@@ -1487,7 +1487,7 @@ class MainWindow(QMainWindow):
         return (self.settings.get("hotkey", DEFAULT_HOTKEY) or "").strip()
 
     def _setup_global_hotkey(self):
-        """Global Add-Word hotkey (configurable in Settings → System).
+        """Global Add-Word hotkey (configurable in Settings → General → Behavior).
 
         On Linux the pynput listener runs in a SEPARATE PROCESS — its X11
         record thread can segfault, and in-process that kills the whole
@@ -2317,7 +2317,7 @@ class MainWindow(QMainWindow):
             if problem:
                 self._tts_fallback_warned = True
                 show_toast(self, tr("Google Cloud TTS unavailable"),
-                           tr("Using gTTS instead — {problem}\nFix it in Settings → Audio.").format(problem=problem),
+                           tr("Using gTTS instead — {problem}\nFix it in Settings → Read-aloud → Audio.").format(problem=problem),
                            "warning", 8000)
 
         if len(records) > 200:

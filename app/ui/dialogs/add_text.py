@@ -424,7 +424,7 @@ class AddTextDialog(FramelessDialog):
         if ai.has_api_key():
             return True
         self._set_status(
-            tr("{ai} API key is not set. Configure it in Settings → APIs → AI.").format(
+            tr("{ai} API key is not set. Configure it in Settings → Translation & AI → AI.").format(
                 ai=ai.provider_label()))
         return False
 
