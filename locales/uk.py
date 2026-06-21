@@ -1360,6 +1360,22 @@ TRANSLATIONS: dict[str, str] = {
     "streets were still full of warm light.":
         "День перший: ми приїхали до міста пізно вночі, а вулиці все ще були "
         "сповнені теплого світла.",
+
+    # ── Stale-reconnect deletion review ────────────────────────────────────
+    "Items deleted on another device": "Елементи, видалені на іншому пристрої",
+    "This device was offline long enough that {n} item(s) below were deleted "
+    "on your other devices in the meantime, yet still exist here.\n\n"
+    "Keep them (re-upload to the cloud for all your devices), or remove them "
+    "from this device?":
+        "Цей пристрій був офлайн достатньо довго, тож наведені нижче {n} елемент(и) "
+        "за цей час було видалено на ваших інших пристроях, але тут вони ще є.\n\n"
+        "Залишити їх (повторно завантажити в хмару для всіх ваших пристроїв) чи "
+        "видалити їх із цього пристрою?",
+    "(untitled)": "(без назви)",
+    "[Text] {title}": "[Текст] {title}",
+    "Remove from this device": "Видалити з цього пристрою",
+    "Decide later": "Вирішити пізніше",
+    "Keep & upload": "Залишити й завантажити",
 }
 
 # Date names, read by app.i18n. Months are in the genitive case because they

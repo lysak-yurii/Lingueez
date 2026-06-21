@@ -85,7 +85,10 @@ def reset_sync_state(db_path: str) -> None:
         conn = sqlite3.connect(db_path)
         try:
             cur = conn.cursor()
-            for table in ("sync_queue", "sync_deletions", "sync_metadata"):
+            # Also clear sync_quarantine: a restored/adopted DB is an explicit
+            # re-seed (push everything), so stale-deletion holds from the old state
+            # must not block its upload.
+            for table in ("sync_queue", "sync_deletions", "sync_metadata", "sync_quarantine"):
                 try:
                     cur.execute(f"DELETE FROM {table}")
                 except sqlite3.OperationalError:
@@ -248,6 +251,19 @@ def initialize_database(db_path=None):
             table_name TEXT NOT NULL,
             record_id TEXT NOT NULL,
             purged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (table_name, record_id)
+        )
+    ''')
+
+    # Rows present locally but deleted on another device while this one was offline
+    # past the tombstone-retention window. They're held here pending the user's
+    # review (keep or remove) and are EXCLUDED from the union upload so a reconcile
+    # can't silently re-upload (resurrect) them before the user decides.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sync_quarantine (
+            table_name TEXT NOT NULL,
+            record_id TEXT NOT NULL,
+            detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (table_name, record_id)
         )
     ''')

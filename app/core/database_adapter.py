@@ -433,6 +433,62 @@ class DatabaseAdapter:
         finally:
             conn.close()
 
+    # ----------------------------------------------------------------- #
+    # Stale-deletion quarantine: rows deleted on another device while this one
+    # was offline past the retention window, held pending the user's review.
+    # Excluded from the union upload so a reconcile can't resurrect them.
+    # ----------------------------------------------------------------- #
+
+    def add_quarantine(self, table_name: str, record_id: str):
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT OR IGNORE INTO sync_quarantine (table_name, record_id) "
+                "VALUES (?, ?)", (table_name, record_id))
+            conn.commit()
+        except Exception as e:
+            logging.warning(f"Error quarantining {table_name} {record_id}: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def remove_quarantine(self, table_name: str, record_id: str):
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM sync_quarantine WHERE table_name = ? AND record_id = ?",
+                (table_name, record_id))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def get_quarantine_ids(self, table_name: str) -> set:
+        """Ids held in the stale-deletion quarantine for a table."""
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT record_id FROM sync_quarantine WHERE table_name = ?", (table_name,))
+            return {row[0] for row in cursor.fetchall()}
+        except Exception:
+            return set()
+        finally:
+            conn.close()
+
+    def get_quarantine_count(self) -> int:
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            return int(cursor.execute("SELECT COUNT(*) FROM sync_quarantine").fetchone()[0] or 0)
+        except Exception:
+            return 0
+        finally:
+            conn.close()
+
     def _get_pending_deletions(self) -> List[Dict[str, Any]]:
         """Get all pending deletions that need to be synced."""
         conn = sqlite3.connect(self.local_db)
