@@ -149,7 +149,8 @@ TRANSLATIONS: dict[str, str] = {
     "Synced — ↑{up} ↓{down}": "Синхронізовано — ↑{up} ↓{down}",
     "Upload restored library?": "Вивантажити відновлену бібліотеку?",
     "Library restored. You'll be asked to upload it the next time you connect a sync server.": "Бібліотеку відновлено. Вам запропонують вивантажити її наступного разу, коли ви підключите сервер синхронізації.",
-    "You restored a backup with {n} words that may not be in your cloud yet. Upload and merge them into your cloud now?\n\nChoose No to leave your cloud unchanged for now.": "Ви відновили резервну копію з {n} словами, яких ще може не бути у вашій хмарі. Вивантажити та об'єднати їх із хмарою зараз?\n\nОберіть «Ні», щоб поки що залишити хмару без змін.",
+    "Merging this restored backup with your cloud:": "Об'єднання цієї відновленої резервної копії з вашою хмарою:",
+    "This backup has {items}. Upload and merge it into your cloud now, or leave your cloud unchanged for now?": "Ця резервна копія містить {items}. Вивантажити та об'єднати її з хмарою зараз чи поки що залишити хмару без змін?",
     "General": "Загальні",
     "Read-aloud": "Озвучення",
     "Translation & AI": "Переклад та ШІ",
@@ -1363,19 +1364,16 @@ TRANSLATIONS: dict[str, str] = {
 
     # ── Stale-reconnect deletion review ────────────────────────────────────
     "Items deleted on another device": "Елементи, видалені на іншому пристрої",
-    "This device was offline long enough that {n} item(s) below were deleted "
-    "on your other devices in the meantime, yet still exist here.\n\n"
-    "Keep them (re-upload to the cloud for all your devices), or remove them "
-    "from this device?":
-        "Цей пристрій був офлайн достатньо довго, тож наведені нижче {n} елемент(и) "
-        "за цей час було видалено на ваших інших пристроях, але тут вони ще є.\n\n"
-        "Залишити їх (повторно завантажити в хмару для всіх ваших пристроїв) чи "
-        "видалити їх із цього пристрою?",
+    "While this device was offline, {n} item(s) here were deleted on your "
+    "other devices. Keep them in the cloud, or remove them from this device?":
+        "Поки цей пристрій був офлайн, {n} елемент(и) тут було видалено на ваших "
+        "інших пристроях. Залишити їх у хмарі чи видалити з цього пристрою?",
     "(untitled)": "(без назви)",
     "[Text] {title}": "[Текст] {title}",
     "Remove from this device": "Видалити з цього пристрою",
     "Decide later": "Вирішити пізніше",
     "Keep & upload": "Залишити й завантажити",
+    "Not now": "Не зараз",
 }
 
 # Date names, read by app.i18n. Months are in the genitive case because they

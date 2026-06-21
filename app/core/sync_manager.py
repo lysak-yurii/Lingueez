@@ -573,6 +573,35 @@ class SyncManager:
             logging.warning(f"reconcile_preview failed: {exc}")
         return summary
 
+    def restore_merge_preview(self) -> Optional[Dict[str, Dict[str, int]]]:
+        """Per-type divergence for the restore-merge prompt: how many words/texts the
+        restored library would upload to (local-only) and download from (cloud-only) the
+        cloud. Read-only, by id, quarantine-aware. Returns
+        ``{'words': {'upload', 'download'}, 'texts': {...}}`` or ``None`` when not
+        syncable or the cloud read fails (the caller then falls back to local counts)."""
+        if not self.is_sync_enabled() or not self._local_db_belongs_to_current_user():
+            return None
+        try:
+            result: Dict[str, Dict[str, int]] = {}
+            conn = sqlite3.connect(self.local_db)
+            try:
+                cur = conn.cursor()
+                for table in ('words', 'texts'):
+                    cloud_ids = set(self.supabase.get_all_ids(table))
+                    cur.execute(f"SELECT ID FROM {table}")
+                    local_ids = {r[0] for r in cur.fetchall()}
+                    q = self.db_adapter.get_quarantine_ids(table)
+                    result[table] = {
+                        'upload': len((local_ids - cloud_ids) - q),
+                        'download': len(cloud_ids - local_ids),
+                    }
+            finally:
+                conn.close()
+            return result
+        except Exception as exc:
+            logging.warning(f"restore_merge_preview failed: {exc}")
+            return None
+
     def _is_stale_reconnect(self) -> bool:
         """True when this device has synced THIS cloud before and is now reconnecting
         after being offline longer than the tombstone-retention (grace) window — the

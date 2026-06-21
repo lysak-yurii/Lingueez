@@ -22,7 +22,7 @@
 """Frameless dialog base with an integrated title bar matching the app."""
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
@@ -135,6 +135,50 @@ def ask_text(parent, title, label, text=""):
     return edit.text(), ok
 
 
+def quiet_frame(colors):
+    """A single soft, rounded container that holds a short list of ``quiet_row``s —
+    the shared 'quiet frame' used by the sync dialogs. Returns ``(frame, vlayout)``;
+    add rows to the layout, then add the frame to your content layout."""
+    frame = QFrame(objectName="QuietFrame")
+    frame.setStyleSheet(
+        f"#QuietFrame{{background:{colors['surface_alt']};"
+        f" border:1px solid {colors['border']}; border-radius:10px;}}")
+    v = QVBoxLayout(frame)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(0)
+    return frame, v
+
+
+def quiet_row(colors, primary, trailing="", *, leading="·", icon=None, divider=True):
+    """One row for a ``quiet_frame``: an optional leading glyph (icon name) or text
+    bullet, the primary text, and a right-aligned dim trailing label. A hairline
+    divider sits on the bottom edge — pass ``divider=False`` for the last row so it
+    doesn't double up with the frame border."""
+    row = QFrame(objectName="QuietRow")
+    row.setStyleSheet(
+        f"#QuietRow{{border-bottom:1px solid {colors['border']};}}" if divider
+        else "#QuietRow{border:none;}")
+    h = QHBoxLayout(row)
+    h.setContentsMargins(14, 11, 14, 11)
+    h.setSpacing(11)
+    if icon:
+        glyph = QLabel()
+        glyph.setPixmap(icons.icon(icon, colors["text_dim"], 15).pixmap(QSize(15, 15)))
+        h.addWidget(glyph, 0, Qt.AlignVCenter)
+    elif leading:
+        dot = QLabel(leading)
+        dot.setStyleSheet(f"color:{colors['text_dim']};")
+        h.addWidget(dot, 0, Qt.AlignVCenter)
+    label = QLabel(str(primary))
+    label.setStyleSheet(f"color:{colors['text']}; font-size:13px;")
+    h.addWidget(label, 1)
+    if str(trailing) != "":
+        tl = QLabel(str(trailing))
+        tl.setStyleSheet(f"color:{colors['text_dim']}; font-size:11.5px;")
+        h.addWidget(tl, 0, Qt.AlignVCenter)
+    return row
+
+
 def confirm(parent, title, message, *, ok_text=None, cancel_text=None,
             danger=False, rows=None):
     """Themed (frameless) yes/no confirmation — a drop-in for QMessageBox.question
@@ -151,33 +195,22 @@ def confirm(parent, title, message, *, ok_text=None, cancel_text=None,
         text.setWordWrap(True)
         dialog.content_layout.addWidget(text)
     if rows:
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(9)
-        grid.setContentsMargins(2, 4, 2, 4)
+        frame, v = quiet_frame(dialog.colors)
+        last = len(rows) - 1
         for i, item in enumerate(rows):
             icon_name, label, value = item if len(item) == 3 else (None, *item)
-            if icon_name:
-                glyph = QLabel()
-                glyph.setPixmap(
-                    icons.icon(icon_name, dialog.colors["text_dim"], 16).pixmap(16, 16))
-                grid.addWidget(glyph, i, 0)
-            name = QLabel(str(label), objectName="dimLabel")
-            grid.addWidget(name, i, 1)
-            val = QLabel(str(value))
-            grid.addWidget(val, i, 2, Qt.AlignRight)
-        grid.setColumnStretch(1, 1)
-        holder = QWidget()
-        holder.setLayout(grid)
-        dialog.content_layout.addWidget(holder)
+            v.addWidget(quiet_row(dialog.colors, label, value, icon=icon_name,
+                                  leading=None, divider=(i < last)))
+        dialog.content_layout.addWidget(frame)
 
     row = QHBoxLayout()
     row.addStretch(1)
-    cancel = QPushButton(cancel_text or tr("Cancel"))
+    # Escape '&' so it shows literally instead of becoming a Qt mnemonic.
+    cancel = QPushButton((cancel_text or tr("Cancel")).replace("&", "&&"))
     cancel.setCursor(Qt.PointingHandCursor)
     cancel.clicked.connect(dialog.reject)
     row.addWidget(cancel)
-    ok = QPushButton(ok_text or tr("OK"),
+    ok = QPushButton((ok_text or tr("OK")).replace("&", "&&"),
                      objectName="dangerButton" if danger else "primaryButton")
     ok.setCursor(Qt.PointingHandCursor)
     ok.setDefault(True)

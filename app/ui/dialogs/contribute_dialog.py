@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.i18n import ntr, tr
+from app.ui import icons
 from app.ui.dialogs.base import FramelessDialog
 
 
@@ -44,6 +45,8 @@ class ContributeDialog(FramelessDialog):
         self._texts = texts
         self.setMinimumWidth(440)
         self.setMinimumHeight(420)
+        self.content_layout.setSpacing(12)
+        c = self.colors
 
         nw, nt = len(words), len(texts)
         word_phrase = ntr(nw, tr("{n} word"), tr("{n} words"),
@@ -61,21 +64,25 @@ class ContributeDialog(FramelessDialog):
             summary = tr("This device has {texts} not yet in {account}.")
         intro = QLabel(summary.format(words=word_phrase, texts=text_phrase, account=account))
         intro.setWordWrap(True)
+        intro.setStyleSheet(f"font-size:14px; font-weight:600; color:{c['text']};")
         self.content_layout.addWidget(intro)
 
         hint = QLabel(tr("Select the items to add. They are copied to your account and "
                          "uploaded to the cloud, so they appear on your other devices. "
                          "The copy on this device is kept."))
         hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {self.colors['text_dim']};")
+        hint.setStyleSheet(f"color: {c['text_dim']}; font-size:12.5px;")
         self.content_layout.addWidget(hint)
 
         self._word_list = self._build_section(
-            tr("Words"), words, lambda w: self._word_label(w)) if nw else None
+            tr("Words"), "book", words, lambda w: self._word_label(w)) if nw else None
         self._text_list = self._build_section(
-            tr("Texts"), texts, lambda t: (t.get('Title') or tr("(untitled)"))) if nt else None
+            tr("Texts"), "file-text", texts,
+            lambda t: (t.get('Title') or tr("(untitled)"))) if nt else None
 
         self.suppress_check = QCheckBox(tr("Don't ask again for this account"))
+        self.suppress_check.setCursor(Qt.PointingHandCursor)
+        self.suppress_check.setStyleSheet(f"color: {c['text_dim']};")
         # Reflect the account's current setting so it can be seen and toggled back
         # off here (this dialog, via the Settings button, is how the opt-out is undone).
         self.suppress_check.setChecked(suppressed)
@@ -96,26 +103,46 @@ class ContributeDialog(FramelessDialog):
         self._update_add_button()
 
     # ---- section construction ----------------------------------------
-    def _build_section(self, title, items, label_fn):
+    def _build_section(self, title, icon_name, items, label_fn):
+        c = self.colors
         header = QHBoxLayout()
+        header.setContentsMargins(2, 4, 2, 0)
+        header.setSpacing(7)
         select_all = QCheckBox(title)
         select_all.setChecked(True)
-        select_all.setStyleSheet("font-weight: 600;")
+        select_all.setCursor(Qt.PointingHandCursor)
+        select_all.setStyleSheet(f"font-weight: 600; color: {c['text']};")
         header.addWidget(select_all)
+        glyph = QLabel()
+        glyph.setPixmap(icons.icon(icon_name, c["text_dim"], 15).pixmap(15, 15))
+        header.addWidget(glyph, 0, Qt.AlignVCenter)
         header.addStretch(1)
         count = QLabel(str(len(items)))
-        count.setStyleSheet(f"color: {self.colors['text_dim']};")
+        count.setStyleSheet(f"color: {c['text_dim']}; font-size: 11.5px;")
         header.addWidget(count)
         self.content_layout.addLayout(header)
 
-        lst = QListWidget()
-        lst.setMaximumHeight(180)
+        lst = QListWidget(objectName="ContributeList")
+        lst.setFrameShape(QListWidget.NoFrame)
+        lst.setStyleSheet(
+            f"#ContributeList{{background:{c['surface_alt']};"
+            f" border:1px solid {c['border']}; border-radius:10px;"
+            f" padding:5px; outline:none;}}"
+            f"#ContributeList::item{{padding:7px 9px; border-radius:6px;"
+            f" margin:1px 2px; color:{c['text']};}}"
+            f"#ContributeList::item:hover{{background:{c['surface']};}}"
+            f"#ContributeList::item:selected{{background:{c['surface']};"
+            f" color:{c['text']};}}")
         for it in items:
             row = QListWidgetItem(label_fn(it))
             row.setFlags(row.flags() | Qt.ItemIsUserCheckable)
             row.setCheckState(Qt.Checked)
             row.setData(Qt.UserRole, it)
             lst.addItem(row)
+        # Fit the container to its content (up to ~5 rows), then scroll — no big
+        # empty box for short lists.
+        row_h = lst.sizeHintForRow(0) if items else 0
+        lst.setMaximumHeight(min(len(items), 5) * row_h + 14)
         self.content_layout.addWidget(lst)
 
         # Header checkbox toggles all; item changes refresh header + Add button.

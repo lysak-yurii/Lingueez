@@ -2700,8 +2700,10 @@ class MainWindow(QMainWindow):
         self.db_adapter.set_use_cloud(self.sync_enabled)
         self._refresh_account_dependent_ui()
         if self.sync_enabled:
-            self._maybe_prompt_restore_merge()  # offer to upload a just-restored library
-            run_in_thread(self._run_startup_sync)
+            # Offer to upload a just-restored library, then sync (the prompt resolves
+            # before the union runs).
+            self._maybe_prompt_restore_merge(
+                on_done=lambda _up: run_in_thread(self._run_startup_sync))
         else:
             self._update_sync_status_ui("idle")
 
@@ -2902,10 +2904,11 @@ class MainWindow(QMainWindow):
             # Already on this file (e.g. opening the account dialog while signed in).
             self._refresh_account_dependent_ui()
             if self.sync_enabled:
-                self._maybe_prompt_restore_merge()
                 cb = ((lambda u=uid: self._maybe_offer_local_contribution(u))
                       if offer_contribution else None)
-                run_in_thread(self._run_startup_sync, on_finished=cb)
+                self._maybe_prompt_restore_merge(
+                    on_done=lambda _up, cb=cb: run_in_thread(
+                        self._run_startup_sync, on_finished=cb))
             return
 
         # 3. One-time import of local-only words into the first account ever signed
@@ -2956,10 +2959,11 @@ class MainWindow(QMainWindow):
         self._refresh_account_dependent_ui()
         self.reload_requested.emit()
         if self.sync_enabled:
-            self._maybe_prompt_restore_merge()
             cb = ((lambda u=uid: self._maybe_offer_local_contribution(u))
                   if offer_contribution else None)
-            run_in_thread(self._run_startup_sync, on_finished=cb)
+            self._maybe_prompt_restore_merge(
+                on_done=lambda _up, cb=cb: run_in_thread(
+                    self._run_startup_sync, on_finished=cb))
         else:
             self._update_sync_status_ui("idle")
 
@@ -3188,22 +3192,42 @@ class MainWindow(QMainWindow):
         pending flag set by the restore dialog drives _maybe_prompt_restore_merge there)."""
         self.load_data()
         if self.sync_enabled:
-            if self._maybe_prompt_restore_merge():
-                run_in_thread(self._run_startup_sync)
+            # Always sync afterward: on Upload it's the full union (reset_sync_state ran),
+            # on "Not now" it's a normal sync that still pulls any cloud-only rows down.
+            self._maybe_prompt_restore_merge(
+                on_done=lambda _up: run_in_thread(self._run_startup_sync))
         else:
             show_toast(self, tr("Backups"),
                        tr("Library restored. You'll be asked to upload it the next time "
                           "you connect a sync server."), "info", 6000)
 
-    def _maybe_prompt_restore_merge(self) -> bool:
+    def _maybe_prompt_restore_merge(self, on_done=None):
         """If a backup was just restored and a sync server is now active, ask whether to
-        upload+merge the restored library into the cloud. On yes, reset the active
+        upload+merge the restored library into the cloud, showing the real per-type
+        upload/download counts (computed off the UI thread). On yes, reset the active
         database's sync bookkeeping so the next sync runs as a full union (push + pull).
-        Returns True if the user opted to upload. Clears the pending flag either way."""
+
+        The pending flag is cleared on Upload, and also when there's nothing left to
+        upload (cloud already has the restored rows). On "Not now" the flag is *kept*, so
+        the offer returns on the next launch — restored rows bypass the per-edit queue
+        and would otherwise never reach the cloud. This is self-terminating: once the
+        rows are uploaded (here or via a manual Sync), the preview reports nothing to
+        push and the flag auto-clears. Cloud-only rows always pull down on the normal
+        sync the caller runs in ``on_done``, so the download half needs no prompt.
+
+        Async: ``on_done(uploaded: bool)`` runs on the GUI thread once resolved. Always
+        called (even when there's no pending restore) so callers can chain their own
+        startup sync afterward."""
         from app.core.db import get_active_db_path
+        done = on_done or (lambda _uploaded=False: None)
+        # Read the flag fresh from disk: the restore dialog writes it straight to
+        # settings (app/ui/dialogs/backups.py) without touching this stale in-memory
+        # copy, so self.settings wouldn't reflect a just-completed restore.
+        self.settings = load_settings()
         if not (get_bool(self.settings, "pending_restore_merge", False)
                 and self.sync_enabled):
-            return False
+            done(False)
+            return
 
         active_db = get_active_db_path()
 
@@ -3212,17 +3236,51 @@ class MainWindow(QMainWindow):
             self.settings["pending_restore_merge"] = "False"
             save_settings(self.settings)
 
-        n_words = self._count_rows(active_db, "words")
-        upload = QMessageBox.question(
-            self, tr("Upload restored library?"),
-            tr("You restored a backup with {n} words that may not be in your cloud yet. "
-               "Upload and merge them into your cloud now?\n\nChoose No to leave your "
-               "cloud unchanged for now.").format(n=n_words),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes) == QMessageBox.Yes
-        _clear_flag()
-        if upload:
-            dbq.reset_sync_state(active_db)   # next sync = full union (push local + pull)
-        return upload
+        def _phrase(nw, nt):
+            w = ntr(nw, tr("{n} word"), tr("{n} words"),
+                    tr("{n} words (genitive)")).format(n=nw)
+            t = ntr(nt, tr("{n} text"), tr("{n} texts"),
+                    tr("{n} texts (genitive)")).format(n=nt)
+            return f"{w}, {t}"
+
+        def show(preview):
+            from app.ui.dialogs.base import confirm
+            rows, message = None, None
+            if preview:
+                wu, tu = preview['words']['upload'], preview['texts']['upload']
+                wd, td = preview['words']['download'], preview['texts']['download']
+                if not (wu or tu):
+                    # Nothing new to push — don't nag; the normal sync pulls any
+                    # cloud-only rows on its own.
+                    _clear_flag()
+                    done(False)
+                    return
+                rows = [("upload", tr("Upload"), _phrase(wu, tu))]
+                if wd or td:
+                    rows.append(("download", tr("Download"), _phrase(wd, td)))
+                message = tr("Merging this restored backup with your cloud:")
+            else:
+                # Cloud read failed (offline mid-restore) — fall back to local counts.
+                nw = self._count_rows(active_db, "words")
+                nt = self._count_rows(active_db, "texts")
+                message = tr("This backup has {items}. Upload and merge it into your "
+                             "cloud now, or leave your cloud unchanged for now?").format(
+                                 items=_phrase(nw, nt))
+
+            upload = confirm(self, tr("Upload restored library?"), message, rows=rows,
+                             ok_text=tr("Upload"), cancel_text=tr("Not now"))
+            if upload:
+                dbq.reset_sync_state(active_db)  # next sync = full union (push + pull)
+                _clear_flag()
+            # else "Not now": keep the flag so the offer returns next launch (it
+            # auto-clears once the restored rows are in the cloud — see the skip above).
+            done(upload)
+
+        # Compute the preview quietly (no global "syncing" status): the modal prompt is
+        # the feedback, and a global status would stick on "Checking…" if the user
+        # declines without triggering a follow-up sync.
+        run_in_thread(self.sync_manager.restore_merge_preview,
+                      on_result=show, on_error=lambda _e: show(None))
 
     @staticmethod
     def _count_rows(db_path, table) -> int:
