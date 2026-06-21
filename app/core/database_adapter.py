@@ -181,11 +181,11 @@ class DatabaseAdapter:
         finally:
             conn.close()
     
-    def _queue_operation(self, operation_type: str, table_name: str, record_id: int, operation_data: Optional[Dict[str, Any]] = None):
-        """Queue an operation for later syncing."""
+    def _queue_operation(self, operation_type: str, table_name: str, record_id: int, operation_data: Optional[Dict[str, Any]] = None) -> Optional[int]:
+        """Queue an operation for later syncing. Returns the new queue row id."""
         conn = sqlite3.connect(self.local_db)
         cursor = conn.cursor()
-        
+
         try:
             operation_data_json = json.dumps(operation_data) if operation_data else None
             cursor.execute('''
@@ -193,12 +193,55 @@ class DatabaseAdapter:
                 VALUES (?, ?, ?, ?, datetime('now'), NULL)
             ''', (operation_type, table_name, record_id, operation_data_json))
             conn.commit()
+            return cursor.lastrowid
         except Exception as e:
             logging.error(f"Error queueing operation: {e}")
+            conn.rollback()
+            return None
+        finally:
+            conn.close()
+
+    def _remove_queued_operations(self, table_name: str, record_id: int):
+        """Drop any unsynced sync_queue rows for a record. Used when an item is
+        permanently deleted, so a still-pending INSERT/UPDATE/RESTORE intent can't
+        resurrect it on the cloud."""
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "DELETE FROM sync_queue WHERE table_name = ? AND record_id = ? "
+                "AND synced_at IS NULL",
+                (table_name, record_id))
+            conn.commit()
+        except Exception as e:
+            logging.warning(f"Error clearing queued operations for {table_name} {record_id}: {e}")
             conn.rollback()
         finally:
             conn.close()
     
+    def _queue_restore_intent(self, table_name: str, record_id: int):
+        """Durably record that a soft-deleted cloud row must be un-deleted, then
+        execute it immediately when online.
+
+        The local row carries no ``deleted_at``, so re-inserting it can't by itself
+        clear the cloud's soft-delete; without a durable intent an offline restore
+        would be silently undone when a later reconcile re-applies the stale cloud
+        deletion. This mirrors the deletion side (``sync_deletions``): the intent
+        survives in ``sync_queue`` and is drained by the sync engine. Restoring an
+        already-live cloud row is a harmless no-op, so queueing unconditionally is
+        safe."""
+        queue_id = self._queue_operation('RESTORE', table_name, record_id, None)
+        if self._use_cloud():
+            try:
+                ok = (self.supabase.restore_word(record_id) if table_name == 'words'
+                      else self.supabase.restore_text(record_id))
+                if ok and queue_id is not None:
+                    self._mark_operation_synced(queue_id)
+            except Exception as e:
+                # Leave the intent queued for the next sync to retry.
+                logging.debug(f"Immediate cloud restore of {table_name} {record_id} "
+                              f"deferred to next sync: {e}")
+
     # ----------------------------------------------------------------- #
     # Local trash ("Bin"). Stashes deleted rows so they can be restored
     # without cloud sync; see app/core/db.py for the schema.
@@ -310,17 +353,33 @@ class DatabaseAdapter:
         return int(n or 0)
 
     def delete_binned_item(self, table_name: str, record_id: int) -> bool:
-        """Permanently delete a binned item: drop the local copy and, when
-        connected, hard-delete the cloud soft-delete too."""
+        """Permanently delete a binned item: drop the local copy and hard-delete the
+        cloud row (now, or durably on the next sync if we're offline).
+
+        Offline, the live cloud row outlives the local one until the next sync. We
+        must keep the row's deletion *tombstone* (its ``sync_deletions`` row) until
+        the cloud copy is actually gone — otherwise the next pull, which re-adds any
+        live cloud row missing locally, would resurrect it. Only once the cloud
+        hard-delete succeeds is the tombstone safe to clear."""
         self._bin_remove(table_name, record_id)
+        # The id is gone for good — cancel any pending sync intents (e.g. a queued
+        # RESTORE/INSERT) so they can't resurrect it on the cloud.
+        self._remove_queued_operations(table_name, record_id)
+
+        hard_delete = (self.supabase.hard_delete_word if table_name == 'words'
+                       else self.supabase.hard_delete_text)
         if self._use_cloud():
             try:
-                if table_name == 'words':
-                    self.supabase.hard_delete_word(record_id)
-                else:
-                    self.supabase.hard_delete_text(record_id)
+                if hard_delete(record_id):
+                    # Cloud row is gone — no resurrection risk, drop the tombstone.
+                    self._remove_deletion_tracking(table_name, record_id)
+                    return True
+                logging.warning(f"Cloud hard-delete of {table_name} {record_id} failed, queued for later")
             except Exception as e:
-                logging.warning(f"Cloud hard-delete of {table_name} {record_id} failed: {e}")
+                logging.warning(f"Cloud hard-delete of {table_name} {record_id} failed: {e}, queued for later")
+        # Offline (or cloud call failed): keep the tombstone so the pull can't
+        # resurrect the still-live cloud row, and durably hard-delete on the next sync.
+        self._queue_operation('HARD_DELETE', table_name, record_id, None)
         return True
 
     def _get_pending_deletions(self) -> List[Dict[str, Any]]:
@@ -344,6 +403,31 @@ class DatabaseAdapter:
         finally:
             conn.close()
     
+    def get_pending_deleted_ids(self, table_name: str) -> set:
+        """Record ids for a table with an *unsynced* deletion intent — a soft-delete
+        tombstone (``sync_deletions``) or a queued ``DELETE``/``HARD_DELETE``.
+
+        The sync engine uses this so its pull side never re-inserts (resurrects) a
+        row the user deleted locally but whose cloud copy hasn't been removed yet."""
+        ids = set()
+        conn = sqlite3.connect(self.local_db)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT record_id FROM sync_deletions "
+                "WHERE table_name = ? AND synced_at IS NULL", (table_name,))
+            ids.update(row[0] for row in cursor.fetchall())
+            cursor.execute(
+                "SELECT record_id FROM sync_queue "
+                "WHERE table_name = ? AND synced_at IS NULL "
+                "AND operation_type IN ('DELETE', 'HARD_DELETE')", (table_name,))
+            ids.update(row[0] for row in cursor.fetchall())
+        except Exception as e:
+            logging.error(f"Error reading pending deleted ids for {table_name}: {e}")
+        finally:
+            conn.close()
+        return ids
+
     def _get_pending_operations(self) -> List[Dict[str, Any]]:
         """Get all pending operations that need to be synced."""
         conn = sqlite3.connect(self.local_db)
@@ -1112,12 +1196,9 @@ class DatabaseAdapter:
                     tag_id = self._get_or_create_tag_sqlite(tag_name)
                     if tag_id:
                         self._add_tag_to_word_sqlite(word_id, tag_id)
-                # Best-effort: clear the cloud soft-delete if the word exists there.
-                if self._use_cloud():
-                    try:
-                        self.supabase.restore_word(word_id)
-                    except Exception as e:
-                        logging.debug(f"Cloud restore of word {word_id} skipped: {e}")
+                # Durably clear the cloud soft-delete (now, or on the next sync if
+                # we're offline) so a later reconcile can't re-delete the word.
+                self._queue_restore_intent('words', word_id)
                 self._bin_remove('words', word_id)
                 self._remove_deletion_tracking('words', word_id)
                 logging.info(f"Restored word {word_id} from local bin")
@@ -1161,11 +1242,9 @@ class DatabaseAdapter:
                 payload = json.loads(binned['payload'])
                 if not self._get_text_sqlite(text_id):
                     self._insert_text_sqlite_with_id(payload, text_id)
-                if self._use_cloud():
-                    try:
-                        self.supabase.restore_text(text_id)
-                    except Exception as e:
-                        logging.debug(f"Cloud restore of text {text_id} skipped: {e}")
+                # Durably clear the cloud soft-delete (now, or on the next sync if
+                # we're offline) so a later reconcile can't re-delete the text.
+                self._queue_restore_intent('texts', text_id)
                 self._bin_remove('texts', text_id)
                 self._remove_deletion_tracking('texts', text_id)
                 logging.info(f"Restored text {text_id} from local bin")

@@ -1265,9 +1265,14 @@ class SyncManager:
             local_ids = {row[0] for row in cursor.fetchall()}
             conn.close()
 
+            # A row the user deleted locally is "missing" too — but it must NOT be
+            # pulled back. Skip any id with a pending local deletion (soft-delete
+            # tombstone or queued hard-delete) until that deletion reaches the cloud.
+            pending_deleted = self.db_adapter.get_pending_deleted_ids('words')
+
             for cloud_word in cloud_words:
                 cloud_id = cloud_word.get('ID') or cloud_word.get('id')
-                if cloud_id and cloud_id not in local_ids:
+                if cloud_id and cloud_id not in local_ids and cloud_id not in pending_deleted:
                     missing['words'].append(cloud_word)
                     logging.debug(f"Detected missing word in local: id={cloud_id}")
 
@@ -1825,7 +1830,16 @@ class SyncManager:
             try:
                 success = False
 
-                if table_name == 'words' and op_data:
+                if op_type == 'RESTORE':
+                    # Durable un-delete: clear the cloud soft-delete for a row the
+                    # user restored from the Bin. No-op if it isn't soft-deleted.
+                    success = (self.supabase.restore_word(record_id) if table_name == 'words'
+                               else self.supabase.restore_text(record_id))
+                elif op_type == 'HARD_DELETE':
+                    # Durable permanent delete of a soft-deleted cloud row.
+                    success = (self.supabase.hard_delete_word(record_id) if table_name == 'words'
+                               else self.supabase.hard_delete_text(record_id))
+                elif table_name == 'words' and op_data:
                     # op_data carries the row's UUID id, so a single upsert handles
                     # both INSERT and UPDATE. On a content collision the cloud keeps
                     # a different id — converge the local row to it.

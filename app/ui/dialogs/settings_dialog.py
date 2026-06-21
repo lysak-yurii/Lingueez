@@ -701,8 +701,9 @@ class SettingsDialog(FramelessDialog):
             schema_row.addStretch(1)
             g.addRow(schema_row)
 
-            # Bin retention only matters once you sync to a server, and is a
-            # power-user concern — kept out of the normal (built-in) view.
+            # Bin retention is a power-user concern — kept out of the normal
+            # (built-in) view. The Bin auto-prunes at launch on the default grace
+            # period regardless; this only exposes the knob to advanced users.
             g.addRow(tr("Bin cleanup grace (days)"),
                      self._spin("cleanup_grace_period_days", 1, 365, 30))
 

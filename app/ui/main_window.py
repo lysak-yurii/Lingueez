@@ -254,9 +254,6 @@ class MainWindow(QMainWindow):
         # then just confirms it — without this, local words flash up before the
         # restore repoints us to the account file.
         self._preselect_active_db()
-        # Not connected until the first sync result confirms reachability; the Bin
-        # button tracks this so it hides when the cloud is unreachable.
-        self._cloud_connected = False
         self.db_adapter = DatabaseAdapter(use_cloud=self.auth.is_logged_in() or is_custom_server())
         self.sync_manager = SyncManager()
 
@@ -575,8 +572,9 @@ class MainWindow(QMainWindow):
         self.nav_stats = nav_button("bar-chart", tr("Statistics"),
                                     lambda: self.switch_page(PAGE_STATS),
                                     checkable=True)
+        # The Bin is always available — its trash store is local-first (bin_items),
+        # so deleted items can be restored with or without cloud sync.
         self.nav_bin = nav_button("trash", tr("Bin (deleted items)"), self.open_bin)
-        self.nav_bin.setVisible(self.sync_enabled)
         sb.addStretch(1)
         self.nav_settings = nav_button("sliders", tr("Settings"), self.open_settings)
 
@@ -2663,12 +2661,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_account_dependent_ui(self):
         """Show/hide the cloud chrome to match the login state. Sync follows login,
-        so the sync button is visible iff signed in; the Bin additionally needs a
-        confirmed cloud connection (resolved by _update_sync_status_ui)."""
+        so the sync button is visible iff signed in. The Bin is always visible — its
+        trash is local-first and works without cloud sync."""
         if self.sync_button is not None:
             self.sync_button.setVisible(self.sync_enabled)
-        if hasattr(self, "nav_bin"):
-            self.nav_bin.setVisible(self.sync_enabled and self._cloud_connected)
 
     def _reapply_sync(self):
         """Re-apply the Supabase client configuration live after the Sync settings
@@ -2701,8 +2697,6 @@ class MainWindow(QMainWindow):
             self._maybe_prompt_restore_merge()  # offer to upload a just-restored library
             run_in_thread(self._run_startup_sync)
         else:
-            self._cloud_connected = False
-            self.nav_bin.setVisible(False)
             self._update_sync_status_ui("idle")
 
     def _restore_session_and_sync(self):
@@ -2961,9 +2955,6 @@ class MainWindow(QMainWindow):
                   if offer_contribution else None)
             run_in_thread(self._run_startup_sync, on_finished=cb)
         else:
-            self._cloud_connected = False
-            if hasattr(self, "nav_bin"):
-                self.nav_bin.setVisible(False)
             self._update_sync_status_ui("idle")
 
     def _run_startup_sync(self):
@@ -2999,12 +2990,6 @@ class MainWindow(QMainWindow):
                 self.sync_popover.set_syncing(True)
             elif status in ("success", "error"):
                 self.sync_popover.set_syncing(False)
-        # Terminal sync results reflect real cloud reachability; the Bin button
-        # (cloud-dependent) follows it.
-        if status in ("success", "error"):
-            self._cloud_connected = status == "success"
-            if hasattr(self, "nav_bin"):
-                self.nav_bin.setVisible(self.sync_enabled and self._cloud_connected)
         if self.sync_button is None:
             return
         name, color_key = SYNC_ICONS.get(status, SYNC_ICONS["idle"])
