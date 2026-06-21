@@ -75,6 +75,8 @@ class SyncPopover(QFrame):
         self._colors = colors
         self._request = 0  # bumps on every show/hide; stale-result guard
         self._anchor = None  # button to re-anchor against when content resizes
+        self._syncing = False  # a sync is in progress while the bubble is open
+        self._fetch_status = None  # callable to re-pull the snapshot on refresh
         self.setMinimumWidth(280)
 
         lay = QVBoxLayout(self)
@@ -146,19 +148,48 @@ class SyncPopover(QFrame):
     def show_below(self, button, fetch_status, syncing=False):
         """Open under *button* and load the status via *fetch_status*()."""
         self._request += 1
+        self._syncing = syncing
+        self._fetch_status = fetch_status
         self._set_value("status", "…", dim=True)
         self._set_value("last", "…", dim=True)
         self._set_value("pending", "…", dim=True)
         self.identity_widget.setVisible(False)
         self.note_label.setVisible(False)
-        self.sync_btn.setEnabled(not syncing)
-        self.sync_btn.setText(tr("Syncing…") if syncing else tr("Sync Now"))
+        self._apply_sync_button()
 
         self._anchor = button
         self.adjustSize()
         self._reposition()
         self.show()
 
+        self._load(fetch_status)
+
+    def set_syncing(self, syncing):
+        """Reflect a sync starting or finishing while the bubble is already open.
+
+        While syncing, the Status row reads 'Syncing…' (so it never misleadingly
+        shows 'everything synced'); when the sync ends we re-pull a fresh snapshot
+        so Last sync / Pending update without the user having to reopen the bubble."""
+        if syncing == self._syncing:
+            return
+        self._syncing = syncing
+        self._apply_sync_button()
+        if syncing:
+            self._set_value("status", tr("Syncing…"), color=self._colors["accent"])
+            self._set_value("pending", "—", dim=True)
+            self._resize_to_content()
+        else:
+            self._load(self._fetch_status)
+
+    def _apply_sync_button(self):
+        self.sync_btn.setEnabled(not self._syncing)
+        self.sync_btn.setText(tr("Syncing…") if self._syncing else tr("Sync Now"))
+
+    def _load(self, fetch_status):
+        """(Re)fetch the status on a worker; a request counter orphans stale results."""
+        if not fetch_status:
+            return
+        self._request += 1
         request = self._request
 
         def done(info):
@@ -241,16 +272,40 @@ class SyncPopover(QFrame):
         else:
             self.identity_widget.setVisible(False)
 
-        connected = bool(info.get("enabled"))
-        self._set_value(
-            "status",
-            tr("Connected") if connected else tr("Not connected"),
-            color=self._colors["success" if connected else "danger"])
+        if self._syncing:
+            # A sync is running right now: say so, instead of a stale snapshot that
+            # would read 'Connected' next to 'everything synced' mid-sync.
+            self._set_value("status", tr("Syncing…"), color=self._colors["accent"])
+        else:
+            connected = bool(info.get("enabled"))
+            self._set_value(
+                "status",
+                tr("Connected") if connected else tr("Not connected"),
+                color=self._colors["success" if connected else "danger"])
 
         last = info.get("last_sync_time")
         self._set_value("last", humanize_time(last),
                         dim=not last, tooltip=str(last or ""))
 
+        self._fill_pending(info)
+
+        if not info.get("first_sync_completed"):
+            self.note_label.setText(tr("Initial sync has not completed yet."))
+            self.note_label.setVisible(True)
+        else:
+            # The popover is a cached singleton; without this the note would
+            # stick forever once shown, even after a successful sync.
+            self.note_label.setVisible(False)
+        self._resize_to_content()
+
+    def _fill_pending(self, info):
+        """The 'Pending' value: queued local changes, the all-clear, or — mid-sync —
+        a neutral dash, since asserting 'everything synced' while a sync is still
+        running would contradict the 'Syncing…' status. The accurate verdict lands
+        the moment the sync ends and the snapshot is re-pulled."""
+        if self._syncing:
+            self._set_value("pending", "—", dim=True)
+            return
         operations = int(info.get("pending_operations") or 0)
         deletions = int(info.get("pending_deletions") or 0)
         if operations or deletions:
@@ -265,15 +320,6 @@ class SyncPopover(QFrame):
                             color=self._colors["warning"])
         else:
             self._set_value("pending", tr("everything synced"), dim=True)
-
-        if not info.get("first_sync_completed"):
-            self.note_label.setText(tr("Initial sync has not completed yet."))
-            self.note_label.setVisible(True)
-        else:
-            # The popover is a cached singleton; without this the note would
-            # stick forever once shown, even after a successful sync.
-            self.note_label.setVisible(False)
-        self._resize_to_content()
 
     def _show_error(self, message):
         self._set_value("status", "Error", color=self._colors["danger"])

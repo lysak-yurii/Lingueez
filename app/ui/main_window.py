@@ -2991,6 +2991,14 @@ class MainWindow(QMainWindow):
 
     def _update_sync_status_ui(self, status, message=""):
         self._sync_running = status == "syncing"
+        # Keep an already-open status bubble in step with the live sync: show
+        # 'Syncing…' as it runs and re-pull a fresh snapshot when it ends, so it
+        # never sits on a stale 'everything synced' mid-sync.
+        if self.sync_popover is not None and self.sync_popover.isVisible():
+            if status == "syncing":
+                self.sync_popover.set_syncing(True)
+            elif status in ("success", "error"):
+                self.sync_popover.set_syncing(False)
         # Terminal sync results reflect real cloud reachability; the Bin button
         # (cloud-dependent) follows it.
         if status in ("success", "error"):
