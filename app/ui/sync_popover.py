@@ -64,9 +64,13 @@ def humanize_time(iso_str):
 
 
 class SyncPopover(QFrame):
-    """Anchored cloud-sync status bubble with a Sync Now action."""
+    """Anchored cloud-sync status bubble with a Sync Now action.
+
+    Two states share the same shell: the live status grid (signed in / personal
+    server) and a local-only *promo* that pitches sync and offers a Sign in CTA."""
 
     sync_requested = Signal()
+    sign_in_requested = Signal()
 
     def __init__(self, colors, parent=None):
         super().__init__(parent, objectName="SyncPopover")
@@ -95,6 +99,14 @@ class SyncPopover(QFrame):
         head.addStretch(1)
         lay.addLayout(head)
 
+        # ---- live status state (signed in / personal server) ----------------
+        # Grouped in one container so it can be swapped wholesale for the promo.
+        self.status_widget = QWidget()
+        status_lay = QVBoxLayout(self.status_widget)
+        status_lay.setContentsMargins(0, 0, 0, 0)
+        status_lay.setSpacing(10)
+        lay.addWidget(self.status_widget)
+
         # Who/where the app is syncing, with a mode icon: a person for a built-in
         # account (shows the email), a server for the personal own-Supabase mode
         # (shows just "Personal"). Hidden when local-only.
@@ -111,7 +123,7 @@ class SyncPopover(QFrame):
         self.identity_widget = QWidget()
         self.identity_widget.setLayout(ident_row)
         self.identity_widget.setVisible(False)
-        lay.addWidget(self.identity_widget)
+        status_lay.addWidget(self.identity_widget)
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(18)
@@ -127,13 +139,13 @@ class SyncPopover(QFrame):
             grid.addWidget(value, row, 1, Qt.AlignRight)
             self._values[key] = value
         grid.setColumnStretch(1, 1)
-        lay.addLayout(grid)
+        status_lay.addLayout(grid)
 
         self.note_label = QLabel("")
         self.note_label.setObjectName("dimLabel")
         self.note_label.setWordWrap(True)
         self.note_label.setVisible(False)
-        lay.addWidget(self.note_label)
+        status_lay.addWidget(self.note_label)
 
         footer = QHBoxLayout()
         footer.addStretch(1)
@@ -141,7 +153,32 @@ class SyncPopover(QFrame):
         self.sync_btn.setCursor(Qt.PointingHandCursor)
         self.sync_btn.clicked.connect(self._on_sync_clicked)
         footer.addWidget(self.sync_btn)
-        lay.addLayout(footer)
+        status_lay.addLayout(footer)
+
+        # ---- local-only promo state -----------------------------------------
+        # Shown instead of the status grid when signed out: a short pitch + a
+        # Sign in CTA that funnels into the app's shared sign-in flow.
+        self.promo_widget = QWidget()
+        promo_lay = QVBoxLayout(self.promo_widget)
+        promo_lay.setContentsMargins(0, 0, 0, 0)
+        promo_lay.setSpacing(8)
+        promo_headline = QLabel(tr("Back up your vocabulary"))
+        promo_headline.setStyleSheet("font-weight: 600;")
+        promo_headline.setWordWrap(True)
+        promo_lay.addWidget(promo_headline)
+        self.promo_body = QLabel("")
+        self.promo_body.setObjectName("dimLabel")
+        self.promo_body.setWordWrap(True)
+        promo_lay.addWidget(self.promo_body)
+        promo_footer = QHBoxLayout()
+        promo_footer.addStretch(1)
+        self.promo_signin_btn = QPushButton(tr("Sign in"), objectName="primaryButton")
+        self.promo_signin_btn.setCursor(Qt.PointingHandCursor)
+        self.promo_signin_btn.clicked.connect(self._on_sign_in_clicked)
+        promo_footer.addWidget(self.promo_signin_btn)
+        promo_lay.addLayout(promo_footer)
+        self.promo_widget.setVisible(False)
+        lay.addWidget(self.promo_widget)
 
     # ------------------------------------------------------------- public
 
@@ -150,6 +187,8 @@ class SyncPopover(QFrame):
         self._request += 1
         self._syncing = syncing
         self._fetch_status = fetch_status
+        self.promo_widget.setVisible(False)
+        self.status_widget.setVisible(True)
         self._set_value("status", "…", dim=True)
         self._set_value("last", "…", dim=True)
         self._set_value("pending", "…", dim=True)
@@ -222,7 +261,16 @@ class SyncPopover(QFrame):
         the layout must be recomputed *before* adjustSize — otherwise the
         bubble keeps its placeholder-sized width and clips longer strings
         (e.g. the Ukrainian 'все синхронізовано'). Re-anchor afterwards, since
-        the right edge must stay aligned to the button as the width grows."""
+        the right edge must stay aligned to the button as the width grows.
+
+        The status/promo content lives in nested container widgets, so their
+        layouts must be invalidated too — otherwise the outer layout re-fits to a
+        stale child size hint and the bubble keeps clipping (e.g. the Ukrainian
+        'все синхронізовано')."""
+        for inner in (self.status_widget, self.promo_widget):
+            if inner.layout() is not None:
+                inner.layout().invalidate()
+                inner.layout().activate()
         self.layout().invalidate()
         self.layout().activate()
         self.adjustSize()
@@ -328,6 +376,35 @@ class SyncPopover(QFrame):
         self.note_label.setText(message)
         self.note_label.setVisible(True)
         self._resize_to_content()
+
+    def show_promo(self, button, word_count, text_count=0):
+        """Open under *button* in the local-only promo state: pitch sync + offer a
+        Sign in CTA. No worker fetch — the content is static save for the counts.
+        The body names words, and texts too once at least one is saved."""
+        self._request += 1  # orphan any in-flight status fetch from a prior open
+        self.status_widget.setVisible(False)
+        n, m = int(word_count or 0), int(text_count or 0)
+        words = "{n} {noun}".format(
+            n=n, noun=ntr(n, tr("word"), tr("words"), tr("words (genitive)")))
+        texts = "{m} {noun}".format(
+            m=m, noun=ntr(m, tr("text"), tr("texts"), tr("texts (genitive)")))
+        if n and m:
+            items = tr("{words} and {texts}").format(words=words, texts=texts)
+        else:
+            # Drop the empty side so the icon-by-texts-only case doesn't read
+            # "0 words and N texts".
+            items = texts if not n else words
+        self.promo_body.setText(
+            tr("You've saved {items} here. Sign in to keep them safe and "
+               "study on all your devices.").format(items=items))
+        self.promo_widget.setVisible(True)
+        self._anchor = button
+        self._resize_to_content()
+        self.show()
+
+    def _on_sign_in_clicked(self):
+        self.hide()
+        self.sign_in_requested.emit()
 
     def _on_sync_clicked(self):
         self.hide()

@@ -1114,6 +1114,26 @@ class DatabaseAdapter:
         conn.close()
         return [dict(row) for row in rows]
     
+    def count_texts(self) -> int:
+        """Lightweight count of saved texts (COUNT(*), no bodies loaded). Used for
+        the local-only sync nudge; returns 0 when the table/DB isn't there yet."""
+        import os
+        if os.path.exists(self.local_db):
+            try:
+                conn = sqlite3.connect(self.local_db)
+                try:
+                    return int(conn.execute("SELECT COUNT(*) FROM texts").fetchone()[0])
+                finally:
+                    conn.close()
+            except (sqlite3.OperationalError, FileNotFoundError):
+                pass
+        if self._use_cloud():
+            try:
+                return len(self.supabase.get_texts())
+            except Exception:
+                return 0
+        return 0
+
     def get_text(self, text_id: int) -> Optional[Dict[str, Any]]:
         """Get a single text by ID. Reads from Supabase if cloud is available and local DB doesn't exist, otherwise from local SQLite."""
         import os

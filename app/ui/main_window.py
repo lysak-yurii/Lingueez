@@ -364,7 +364,11 @@ class MainWindow(QMainWindow):
         # First-launch guided tour (skipped once tour_completed is set).
         from app.ui.tour import TourController
         self._tour = TourController(self)
-        self._tour.maybe_start_on_launch()
+        # On a fresh, signed-out launch, pitch sync first (a skippable welcome)
+        # so it doesn't overlap the spotlight tour; the welcome chains the tour
+        # from its own close. Otherwise start the tour straight away.
+        if not self._maybe_show_welcome():
+            self._tour.maybe_start_on_launch()
 
     @property
     def sync_enabled(self) -> bool:
@@ -685,7 +689,7 @@ class MainWindow(QMainWindow):
         self.sync_button.setToolTip(tr("Cloud sync: idle"))
         self.sync_button.setCursor(Qt.PointingHandCursor)
         self.sync_button.clicked.connect(self.show_sync_info)
-        self.sync_button.setVisible(self.sync_enabled)
+        self._update_sync_button_visibility()
         h.addWidget(self.sync_button, 0, Qt.AlignVCenter)
 
         h.addSpacing(8)
@@ -1059,7 +1063,7 @@ class MainWindow(QMainWindow):
         self.search_scope_btn.setVisible(on_words and not self._buttons_collapsed)
         self.header_overflow_btn.setVisible(
             on_words and self._buttons_collapsed and not searching)
-        self.sync_button.setVisible(self.sync_enabled and not searching)
+        self._update_sync_button_visibility()
 
     def _on_search_expanded(self, expanded):
         # the search opened/closed in compact mode — re-evaluate which header
@@ -1767,6 +1771,12 @@ class MainWindow(QMainWindow):
         self.stats_page.set_data(self.df, tag_counts, def_counts, reviews)
 
     def _on_texts_counts(self, shown, total):
+        # Keep the local-only sync nudge in step as texts are added/removed (the
+        # texts page reloads and re-emits its total), not just on a full reload.
+        if total != getattr(self, "_total_texts", 0):
+            self._total_texts = total
+            self._update_sync_button_visibility()
+            self._update_empty_signin_link()
         if total == 0:
             text = tr("No texts yet")
         elif shown == total:
@@ -1783,6 +1793,10 @@ class MainWindow(QMainWindow):
         try:
             words = self.db_adapter.get_words()
             self.df = words_to_dataframe(words)
+            # Cache the text count (cheap COUNT) for the local-only sync nudge, so
+            # refresh_display -> _update_words_empty can size/word the prompt without
+            # re-querying on every filter change.
+            self._total_texts = self.db_adapter.count_texts()
             self.update_filter_combos()
             self.refresh_display()
             self._words_subtitle = tr("Vocabulary")
@@ -1944,11 +1958,16 @@ class MainWindow(QMainWindow):
         self._empty_import_btn = link_button(self.import_excel)
         self._empty_dot = QLabel("·", objectName="dimLabel")
         self._empty_tour_btn = link_button(self.start_tour)
+        # Local-only nudge: drop into the shared sign-in flow. Shown only on the
+        # first-run empty page while signed out (see _update_empty_signin_link).
+        self._empty_signin_dot = QLabel("·", objectName="dimLabel")
+        self._empty_signin_btn = link_button(self.open_sign_in)
         self._empty_clear_btn = link_button(self._clear_word_filters)
         self._empty_links = (self._empty_import_btn, self._empty_tour_btn,
-                             self._empty_clear_btn)
+                             self._empty_signin_btn, self._empty_clear_btn)
         self._style_empty_links()
         for w in (self._empty_import_btn, self._empty_dot, self._empty_tour_btn,
+                  self._empty_signin_dot, self._empty_signin_btn,
                   self._empty_clear_btn):
             links.addWidget(w)
         links.addStretch(1)
@@ -1968,13 +1987,21 @@ class MainWindow(QMainWindow):
 
     def _update_words_empty(self, shown, total):
         """Toggle table vs. empty state and pick the right message/actions."""
+        # Cache the live word count and re-evaluate the contextual cloud nudge —
+        # this runs on every load, so the icon appears the moment the threshold
+        # is crossed (and after every add/delete via _after_db_change -> load_data).
+        self._total_words = total
+        self._update_sync_button_visibility()
         if shown > 0:
+            self._empty_first_run = False
+            self._update_empty_signin_link()
             self.filter_row.setVisible(True)
             self.table_stack.setCurrentIndex(0)
             if self._empty_anim.state() != QAbstractAnimation.Stopped:
                 self._empty_anim.pause()
             return
         first_run = total == 0
+        self._empty_first_run = first_run
         # hide the tag/Favorites chips above the first-run empty state; keep them
         # when a filter merely matches nothing so the user can adjust it
         self.filter_row.setVisible(not first_run)
@@ -1988,6 +2015,7 @@ class MainWindow(QMainWindow):
             self._empty_add_btn.setText(tr("Add your first word"))
             self._empty_import_btn.setText(tr("Import from Excel"))
             self._empty_tour_btn.setText(tr("Take the tour"))
+            self._empty_signin_btn.setText(tr("Sign in to sync across devices"))
         else:
             self._empty_title.setText(tr("No matching words"))
             self._empty_sub.setText(tr("Try a different search or filter."))
@@ -1998,9 +2026,20 @@ class MainWindow(QMainWindow):
                   self._empty_tour_btn):
             w.setVisible(first_run)
         self._empty_clear_btn.setVisible(not first_run)
+        self._update_empty_signin_link()
 
         self.table_stack.setCurrentIndex(1)
         self._empty_anim.start()
+
+    def _update_empty_signin_link(self):
+        """The empty Words page offers 'Sign in to sync' only in the first-run
+        state and only while local-only — a signed-in user already syncs."""
+        btn = getattr(self, "_empty_signin_btn", None)
+        if btn is None:
+            return
+        show = getattr(self, "_empty_first_run", False) and not self.sync_enabled
+        self._empty_signin_dot.setVisible(show)
+        btn.setVisible(show)
 
     def _style_empty_links(self):
         # Accent text that reads as a link, with a prominent accent-tinted pill on hover.
@@ -2667,10 +2706,78 @@ class MainWindow(QMainWindow):
 
     def _refresh_account_dependent_ui(self):
         """Show/hide the cloud chrome to match the login state. Sync follows login,
-        so the sync button is visible iff signed in. The Bin is always visible — its
-        trash is local-first and works without cloud sync."""
-        if self.sync_button is not None:
-            self.sync_button.setVisible(self.sync_enabled)
+        so when signed in the sync button shows the live status; when local-only it
+        turns into a contextual sign-in nudge (see _update_sync_button_visibility).
+        The Bin is always visible — its trash is local-first and works without sync."""
+        self._update_sync_button_visibility()
+        # The empty Words page carries a "sign in to sync" link only while local;
+        # re-evaluate it so the link appears/disappears the moment login flips.
+        self._update_empty_signin_link()
+
+    def _maybe_show_welcome(self):
+        """First, signed-out launch only: schedule the welcome dialog and return
+        True so the caller defers the tour (the welcome chains it on close). Marks
+        the dialog seen once, so it never reappears regardless of the choice made."""
+        if get_bool(self.settings, "welcome_seen", False) or self.sync_enabled:
+            return False
+        # Defer so the main window paints before the modal appears on top of it.
+        QTimer.singleShot(250, self._show_welcome)
+        return True
+
+    def _show_welcome(self):
+        self.settings["welcome_seen"] = "True"
+        save_settings(self.settings)
+        from app.ui.dialogs.welcome_dialog import WelcomeDialog
+        accepted = bool(WelcomeDialog(self).exec())
+        if accepted:
+            self.open_sign_in()
+        # Either way, continue into the normal first-launch tour afterwards.
+        if getattr(self, "_tour", None) is not None:
+            self._tour.maybe_start_on_launch()
+
+    def open_sign_in(self):
+        """Shared sign-in entry point for the welcome dialog, the empty-state link
+        and the local-only sync popover. Mirrors Settings' account flow: open the
+        sign-in dialog and, on success, switch to that account's local DB (with the
+        first-time local-data adoption prompt) and sync."""
+        from app.ui.dialogs.account_dialog import AccountDialog
+        dlg = AccountDialog(self, auth=self.auth)
+        signed_in = {"ok": False}
+        dlg.authenticated.connect(lambda: signed_in.__setitem__("ok", True))
+        dlg.exec()
+        # After the dialog closes so any adoption prompt isn't stacked on it.
+        if signed_in["ok"]:
+            self.switch_active_account(self.auth.current_user_id(),
+                                       offer_contribution=True)
+
+    def _sync_prompt_due(self):
+        """Local-only: surface the cloud entry point only once there's content
+        worth protecting (words + texts >= the configured threshold), so an empty
+        app is never nagged. Signed-in users always see the button (live status)."""
+        threshold = get_int(self.settings, "sync_prompt_threshold", 5)
+        saved = getattr(self, "_total_words", 0) + getattr(self, "_total_texts", 0)
+        return saved >= threshold
+
+    def _update_sync_button_visibility(self):
+        """Single source of truth for the top-bar cloud button. Signed in: always
+        visible (live status icon, managed by _update_sync_status_ui). Local-only:
+        visible as a dim 'sign in to sync' nudge once the word threshold is met.
+        Hidden while the compact search field is open so it has room."""
+        if self.sync_button is None:
+            return
+        searching = (self.search_field.is_open()
+                     if getattr(self, "search_field", None) is not None else False)
+        if self.sync_enabled:
+            visible = True
+        else:
+            visible = self._sync_prompt_due()
+            if visible:
+                # Local-only look: the live status icon logic only runs while
+                # signed in, so set the resting dim cloud + nudge tooltip here.
+                self._set_icon(self.sync_button, "cloud", "text_dim")
+                self.sync_button.setToolTip(
+                    tr("Local only — sign in to sync your words across devices"))
+        self.sync_button.setVisible(visible and not searching)
 
     def _reapply_sync(self):
         """Re-apply the Supabase client configuration live after the Sync settings
@@ -3029,9 +3136,17 @@ class MainWindow(QMainWindow):
             # The manual button does a full reconcile (deep two-way check), not the
             # incremental startup sync.
             self.sync_popover.sync_requested.connect(self._run_full_sync)
-        self.sync_popover.show_below(self.sync_button,
-                                     self.sync_manager.get_sync_status,
-                                     syncing=self._sync_running)
+            self.sync_popover.sign_in_requested.connect(self.open_sign_in)
+        if self.sync_enabled:
+            self.sync_popover.show_below(self.sync_button,
+                                         self.sync_manager.get_sync_status,
+                                         syncing=self._sync_running)
+        else:
+            # Local-only: the button is a sign-in nudge, so pitch sync instead of
+            # showing a status grid that would read "Not connected".
+            self.sync_popover.show_promo(self.sync_button,
+                                         getattr(self, "_total_words", 0),
+                                         getattr(self, "_total_texts", 0))
 
     # Above this many uploads/downloads/removals, a manual reconcile asks first.
     RECONCILE_CONFIRM_THRESHOLD = 25

@@ -619,6 +619,34 @@ TRANSLATIONS: dict[str, str] = {
     "Initial sync has not completed yet.": "Початкова синхронізація ще не завершена.",
     "Sync Now": "Синхронізувати",
     "Syncing…": "Синхронізується…",
+    # Local-only promo state
+    "Back up your vocabulary": "Резервна копія вашого словника",
+    "{words} and {texts}": "{words} і {texts}",
+    "You've saved {items} here. Sign in to keep them safe and study on all your devices.":
+        "Збережено {items}. Увійдіть, щоб не втратити їх та мати змогу навчатися на всіх пристроях.",
+
+    # ── Local-only sync nudges (main_window.py) ──────────────────────────
+    "Local only — sign in to sync your words across devices":
+        "Лише локально — увійдіть, щоб синхронізувати слова між пристроями",
+    "Sign in to sync across devices": "Увійти для синхронізації",
+
+    # ── welcome_dialog.py ────────────────────────────────────────────────
+    "Welcome": "Ласкаво просимо",
+    "Welcome to {app}": "Ласкаво просимо до {app}",
+    "Sync across your devices": "Синхронізація між пристроями",
+    "Sign in to keep your vocabulary safe and study it on every device.":
+        "Увійдіть, щоб зберегти свій словник і вивчати його на кожному пристрої.",
+    "Automatic cloud backup": "Автоматичне резервне копіювання у хмару",
+    "Your words follow you to every computer.":
+        "Ваші слова будуть з вами на кожному комп’ютері.",
+    "Never lose your progress.": "Ніколи не втрачайте свій прогрес.",
+    "Study anywhere": "Навчайтеся будь-де",
+    "Pick up right where you left off.":
+        "Продовжуйте саме з того місця, де зупинилися.",
+    "Your data is yours — sign in only to sync it.":
+        "Ваші дані належать вам — вхід потрібен лише для синхронізації.",
+    "Sign in / Create account": "Увійти / Створити акаунт",
+    "Continue on this device": "Продовжити на цьому пристрої",
 
     # ── player.py ──────────────────────────────────────────────────────────
     "Playback settings": "Налаштування відтворення",
@@ -849,8 +877,10 @@ TRANSLATIONS: dict[str, str] = {
     # ── Count nouns (for ntr() in backups.py / sync_popover.py) ───────────
     "word": "слово",
     "words": "слова",
+    "words (genitive)": "слів",
     "text": "текст",
     "texts": "тексти",
+    "texts (genitive)": "текстів",
     "tag": "тег",
     "tags": "теги",
 

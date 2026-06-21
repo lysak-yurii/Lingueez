@@ -46,6 +46,12 @@ DEFAULTS = {
     "tour_words_seen": "False",
     "tour_texts_seen": "False",
     "tour_stats_seen": "False",
+    # First-run welcome (sync pitch). Set once it has been shown, so it never
+    # reappears regardless of whether the user signed in or stayed local-only.
+    "welcome_seen": "False",
+    # Local-only nudge: how many words must exist before the contextual cloud
+    # icon (and its "back them up" popover) appears. Keeps an empty app un-nagged.
+    "sync_prompt_threshold": "5",
     # Audio
     "pause_duration": "0.5",
     "number_of_repeats": "1",
