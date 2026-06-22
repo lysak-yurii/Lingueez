@@ -856,6 +856,17 @@ TRANSLATIONS: dict[str, str] = {
         "«Додати слово» зі вмістом буфера обміну звідусіль. "
         "Залиште порожнім, щоб вимкнути."
     ),
+    "On Wayland this shortcut is registered with your "
+    "desktop and appears in the system keyboard settings.": (
+        "У Wayland це поєднання реєструється у вашому середовищі "
+        "й з’являється в системних налаштуваннях клавіатури."
+    ),
+    "Add Word hotkey": "Гаряча клавіша «Додати слово»",
+    "The global hotkey needs an X11 session or a newer desktop "
+    "on Wayland.": (
+        "Глобальна гаряча клавіша потребує сеансу X11 або новішого "
+        "середовища у Wayland."
+    ),
     "Add font…": "Додати шрифт…",
     "TrueType fonts (*.ttf)": "Шрифти TrueType (*.ttf)",
     "Could not copy the font file:\n{error}": "Не вдалося скопіювати файл шрифту:\n{error}",

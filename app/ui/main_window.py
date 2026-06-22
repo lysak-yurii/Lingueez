@@ -31,6 +31,7 @@ from datetime import datetime, timedelta
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve,
                             QEvent, QPoint, QPropertyAnimation, QSize, Qt,
                             QTimer, Signal)
+from PySide6.QtNetwork import QLocalServer
 from PySide6.QtGui import (
     QAction, QDesktopServices, QFont, QFontMetrics, QGuiApplication, QIcon,
     QKeySequence, QShortcut,
@@ -71,7 +72,7 @@ from app.ui.word_model import (
     COL_WORD1, COL_WORD2, HEADERS, WordFilter, WordTableModel, words_to_dataframe,
 )
 from app.ui.workers import run_in_thread
-from app.version import APP_NAME, APP_VERSION, BUILD_NUMBER
+from app.version import APP_ID, APP_NAME, APP_VERSION, BUILD_NUMBER
 
 GEOMETRY_FILE = "window_geometry.json"
 PREDEFINED_STATUSES = ["New", "To Learn", "Learning", "Mastered", "Ignored"]
@@ -114,6 +115,72 @@ def _hotkey_to_keyboard(seq):
         "windows" if p in ("meta", "super", "cmd") else p
         for p in (s.strip().lower() for s in seq.split("+") if s.strip())
     )
+
+
+# GTK accelerator modifier names, keyed by the lowercased Qt token.
+_GNOME_MODIFIERS = {
+    "ctrl": "<Control>", "control": "<Control>",
+    "shift": "<Shift>",
+    "alt": "<Alt>",
+    "meta": "<Super>", "super": "<Super>", "win": "<Super>", "cmd": "<Super>",
+}
+
+
+def _hotkey_to_gnome(seq):
+    """Qt portable shortcut ("Ctrl+Shift+V") -> GTK accelerator ("<Control><Shift>v").
+
+    This is the format GNOME's custom-keybinding ``binding`` key expects. Modifiers
+    become <Control>/<Shift>/<Alt>/<Super>; the final key is lowercased (single
+    chars) or passed through (named keys like F1, space)."""
+    mods, key = [], ""
+    for part in (p.strip() for p in seq.split("+") if p.strip()):
+        low = part.lower()
+        if low in _GNOME_MODIFIERS:
+            mods.append(_GNOME_MODIFIERS[low])
+        else:
+            key = low if len(part) == 1 else part
+    return "".join(mods) + key
+
+
+def _is_wayland():
+    return (os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+            or bool(os.environ.get("WAYLAND_DISPLAY")))
+
+
+def _desktop_is_gnome():
+    return "gnome" in os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+
+
+_portal_shortcuts_cache = None
+
+
+def _global_shortcuts_portal_available():
+    """Whether the desktop exposes org.freedesktop.portal.GlobalShortcuts.
+
+    False on GNOME 46 (the portal lands in GNOME 48), so we fall through to the
+    gsettings path. Cached — the answer can't change within a session. Uses QtDBus
+    so it works regardless of session bus tooling."""
+    global _portal_shortcuts_cache
+    if _portal_shortcuts_cache is not None:
+        return _portal_shortcuts_cache
+    available = False
+    try:
+        from PySide6.QtDBus import QDBusConnection, QDBusInterface
+        iface = QDBusInterface("org.freedesktop.portal.Desktop",
+                               "/org/freedesktop/portal/desktop",
+                               "org.freedesktop.DBus.Properties",
+                               QDBusConnection.sessionBus())
+        reply = iface.call("Get", "org.freedesktop.portal.GlobalShortcuts", "version")
+        available = reply.errorName() == ""  # no error => interface present
+    except Exception as exc:
+        logging.debug(f"GlobalShortcuts portal probe failed: {exc}")
+    _portal_shortcuts_cache = available
+    return available
+
+
+# Local-socket name the running instance listens on; a second launch with
+# --add-word connects here to open the dialog. Must match main.py's forwarder.
+IPC_SOCKET_NAME = f"{APP_ID}-add-word"
 
 # sync status -> (icon name, color key)
 SYNC_ICONS = {
@@ -230,7 +297,8 @@ class MainWindow(QMainWindow):
     # runs on a worker). Payload is the user_id, or None for the local-only store.
     account_switch_requested = Signal(object)
 
-    def __init__(self, settings, start_hidden=False):
+    def __init__(self, settings, start_hidden=False, open_add_word=False,
+                 activation_token=""):
         super().__init__()
         self.settings = settings
         self.colors = theme.current_colors()
@@ -292,6 +360,12 @@ class MainWindow(QMainWindow):
         self._build_tray()
         self._setup_shortcuts()
         self._setup_global_hotkey()
+        # Cold start from the global hotkey while the app was closed: open the
+        # Add-Word dialog once the window is up, carrying the activation token so
+        # the dialog can take focus on Wayland.
+        if open_add_word:
+            self._pending_activation_token = activation_token or None
+            QTimer.singleShot(0, lambda: self.open_add_word_and_translate(from_hotkey=True))
         # size hints are only reliable once widgets are polished
         QTimer.singleShot(0, self._lock_filter_row_height)
 
@@ -303,7 +377,8 @@ class MainWindow(QMainWindow):
         self.sync_status_changed.connect(self._update_sync_status_ui)
         self._sync_running = False
         self.sync_popover = None  # built lazily on first cloud-icon click
-        self.hotkey_pressed.connect(self.open_add_word_and_translate)
+        self.hotkey_pressed.connect(
+            lambda: self.open_add_word_and_translate(from_hotkey=True))
         self.reload_requested.connect(self.load_data)
         self.account_switch_requested.connect(self.switch_active_account)
         self.stale_review_requested.connect(
@@ -1513,7 +1588,48 @@ class MainWindow(QMainWindow):
         self._hotkey_proc = None
         self._hotkey_handle = None
         self._active_hotkey = None
+        self._ipc_server = None
+        self._gsettings_active = False     # we own a GNOME custom keybinding
+        self._wayland_warned = False
+        # xdg-activation token carried in from a hotkey launch (Wayland), used to
+        # let the Add-Word dialog grab focus instead of tripping focus-stealing.
+        self._pending_activation_token = None
+        self._setup_ipc_trigger()
         self._apply_global_hotkey()
+
+    def _setup_ipc_trigger(self):
+        """Listen on a local socket so an external command (e.g. a Wayland desktop
+        keybinding running ``--add-word``) can open the Add-Word dialog in this
+        already-running instance. On X11/Windows this simply sits idle — the OS
+        hotkey path still drives the dialog directly."""
+        QLocalServer.removeServer(IPC_SOCKET_NAME)  # clear a stale socket
+        server = QLocalServer(self)
+        if not server.listen(IPC_SOCKET_NAME):
+            logging.warning(f"Add-Word IPC socket unavailable: {server.errorString()}")
+            return
+        server.newConnection.connect(self._on_ipc_connection)
+        self._ipc_server = server
+
+    def _on_ipc_connection(self):
+        conn = self._ipc_server.nextPendingConnection()
+        if conn is None:
+            return
+
+        def _read():
+            # Message is "ADD_WORD" optionally followed by an xdg-activation token:
+            # "ADD_WORD <token>". The token (when the desktop provides one) lets the
+            # dialog take focus on Wayland; without it, focus-stealing prevention
+            # shows a "… is ready" notification instead.
+            parts = bytes(conn.readAll()).strip().split(b" ", 1)
+            if parts and parts[0] == b"ADD_WORD":
+                token = parts[1].decode(errors="replace") if len(parts) > 1 else ""
+                self._pending_activation_token = token or None
+                logging.info(f"Add-Word hotkey: activation token "
+                             f"{'received' if token else 'ABSENT'}")
+                self.hotkey_pressed.emit()
+            conn.disconnectFromServer()
+
+        conn.readyRead.connect(_read)
 
     def _apply_global_hotkey(self):
         """(Re)register the hotkey from settings; safe to call repeatedly."""
@@ -1536,9 +1652,128 @@ class MainWindow(QMainWindow):
                 logging.warning(f"Global hotkey unavailable: {exc}")
             return
 
+        # Linux. Tear down whichever registration we had, then pick the right one
+        # for the current session so we never leave two active at once.
         self._stop_hotkey_agent()
-        if hotkey:
+        self._remove_gnome_hotkey()
+        if not hotkey:
+            return
+
+        if not _is_wayland():
+            # X11: the pynput record-extension agent works (unchanged path).
             self._start_hotkey_agent()
+        elif _global_shortcuts_portal_available() and self._apply_portal_hotkey(hotkey):
+            pass                                  # future-proof: GNOME 48+/KDE
+        elif _desktop_is_gnome():
+            self._apply_gnome_gsettings_hotkey(hotkey)
+        else:
+            self._warn_wayland_hotkey_unsupported()
+
+    # ---- Wayland: GNOME custom keybinding via gsettings -----------------
+    # Wayland forbids apps from globally grabbing keys (pynput sees nothing), so
+    # we register the shortcut with the desktop itself. The keybinding runs
+    # ``<launcher> --add-word``, which our local socket forwards to this instance.
+
+    GNOME_KEYS_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
+    GNOME_KEY_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding"
+    GNOME_KEY_PATH = ("/org/gnome/settings-daemon/plugins/media-keys/"
+                      "custom-keybindings/lingueez-add-word/")
+
+    def _apply_gnome_gsettings_hotkey(self, hotkey):
+        try:
+            self._gnome_ensure_path_registered()
+            child = f"{self.GNOME_KEY_SCHEMA}:{self.GNOME_KEY_PATH}"
+            self._gsettings_set(child, "name", "Lingueez — Add Word")
+            self._gsettings_set(child, "command", self._add_word_launch_command())
+            self._gsettings_set(child, "binding", _hotkey_to_gnome(hotkey))
+            self._gsettings_active = True
+        except Exception as exc:
+            logging.warning(f"Could not register GNOME hotkey: {exc}")
+
+    def _remove_gnome_hotkey(self):
+        """Drop our entry from GNOME's custom-keybindings list (idempotent)."""
+        if not (_desktop_is_gnome() and (self._gsettings_active
+                                         or self._gnome_path_listed())):
+            return
+        try:
+            paths = self._gnome_listed_paths()
+            if self.GNOME_KEY_PATH in paths:
+                paths.remove(self.GNOME_KEY_PATH)
+                self._gnome_write_paths(paths)
+        except Exception as exc:
+            logging.warning(f"Could not remove GNOME hotkey: {exc}")
+        self._gsettings_active = False
+
+    def _gnome_ensure_path_registered(self):
+        paths = self._gnome_listed_paths()
+        if self.GNOME_KEY_PATH not in paths:
+            paths.append(self.GNOME_KEY_PATH)
+            self._gnome_write_paths(paths)
+
+    def _gnome_path_listed(self):
+        try:
+            return self.GNOME_KEY_PATH in self._gnome_listed_paths()
+        except Exception:
+            return False
+
+    def _gnome_listed_paths(self):
+        """Current custom-keybindings list as a Python list of object paths."""
+        raw = self._gsettings_get(self.GNOME_KEYS_SCHEMA, "custom-keybindings")
+        import ast
+        try:
+            val = ast.literal_eval(raw)
+            return [str(p) for p in val]
+        except (ValueError, SyntaxError):
+            return []
+
+    def _gnome_write_paths(self, paths):
+        value = "[" + ", ".join(f"'{p}'" for p in paths) + "]"
+        self._gsettings_set(self.GNOME_KEYS_SCHEMA, "custom-keybindings", value)
+
+    @staticmethod
+    def _gsettings_get(schema, key):
+        import subprocess
+        return subprocess.run(["gsettings", "get", schema, key],
+                              capture_output=True, text=True, check=True,
+                              timeout=5).stdout.strip()
+
+    @staticmethod
+    def _gsettings_set(target, key, value):
+        import subprocess
+        # ``target`` is either a schema id or "schema:path" for relocatable schemas.
+        subprocess.run(["gsettings", "set", target, key, value],
+                       capture_output=True, text=True, check=True, timeout=5)
+
+    @staticmethod
+    def _add_word_launch_command():
+        """Shell command the desktop runs on the hotkey: launch us with --add-word.
+        A running instance forwards it over the local socket; a cold start opens
+        the dialog after init."""
+        import shlex
+        if getattr(sys, "frozen", False):
+            return f"{shlex.quote(sys.executable)} --add-word"
+        entry = os.path.abspath(sys.argv[0])
+        return f"{shlex.quote(sys.executable)} {shlex.quote(entry)} --add-word"
+
+    # ---- Wayland: GlobalShortcuts portal (GNOME 48+/KDE) ----------------
+    def _apply_portal_hotkey(self, hotkey):
+        """Register via org.freedesktop.portal.GlobalShortcuts. Returns True on
+        success. Not reached today because the portal is absent on GNOME 46
+        (_global_shortcuts_portal_available() returns False), so this is the
+        future-proof hook: implement the CreateSession -> BindShortcuts ->
+        Activated(QtDBus) flow here when targeting portal-capable desktops."""
+        return False  # TODO: QtDBus GlobalShortcuts implementation
+
+    def _warn_wayland_hotkey_unsupported(self):
+        if self._wayland_warned:
+            return
+        self._wayland_warned = True
+        logging.warning("Global hotkey not supported on this Wayland desktop "
+                        "(no GlobalShortcuts portal, not GNOME). Use X11 for the "
+                        "global Add-Word hotkey.")
+        show_toast(self, tr("Add Word hotkey"),
+                   tr("The global hotkey needs an X11 session or a newer desktop "
+                      "on Wayland."), "info")
 
     def _update_tray_hotkey_label(self):
         action = getattr(self, "tray_add_action", None)
@@ -1596,7 +1831,8 @@ class MainWindow(QMainWindow):
         menu = QMenu()
         menu.addAction(tr("Show"), self.show_window)
         menu.addSeparator()
-        self.tray_add_action = menu.addAction(tr("Add Word"), self.open_add_word_and_translate)
+        self.tray_add_action = menu.addAction(
+            tr("Add Word"), lambda: self.open_add_word_and_translate(from_hotkey=True))
         self._update_tray_hotkey_label()
         menu.addAction(tr("Settings"), self._open_settings_from_tray)
         menu.addSeparator()
@@ -1691,6 +1927,13 @@ class MainWindow(QMainWindow):
             try:
                 self._hotkey_proc.finished.disconnect(self._on_hotkey_agent_died)
                 self._hotkey_proc.kill()
+            except Exception:
+                pass
+        # Close the IPC socket but KEEP any GNOME keybinding: it relaunches us
+        # via --add-word, so the Add-Word hotkey keeps working while we're closed.
+        if getattr(self, "_ipc_server", None) is not None:
+            try:
+                self._ipc_server.close()
             except Exception:
                 pass
         save_geometry(self, "main_window")
@@ -2158,31 +2401,92 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------ actions
 
-    def open_add_word(self, prefill=None, auto_translate=False, language1=None):
-        from app.ui.dialogs.add_word import AddWordDialog
-        # When the main window is hidden/minimized (hotkey flow), open the
-        # dialog without a parent so it doesn't drag the main window onto
-        # the screen behind it.
+    def open_add_word(self, prefill=None, auto_translate=False, language1=None,
+                      from_hotkey=False, fill_from_clipboard=False):
+        # Wayland focus workaround (pre-GlobalShortcuts-portal desktops, e.g.
+        # GNOME 46/47). Such sessions give a global-shortcut launch no activation
+        # token, so a freshly mapped dialog can't take focus while any window of
+        # ours is still mapped — the compositor shows a "… is ready" notification
+        # instead of the dialog. Worse, Wayland won't even tell us the window is
+        # minimized: isMinimized()/isExposed() both read "normal" a moment after
+        # the user minimises. So for an external launch (hotkey / tray menu) on
+        # such a session, drop to the tray first — the zero-window state that DOES
+        # focus, same as the normal tray case — and open the dialog on a LATER
+        # event-loop turn, once the compositor has processed the unmap. Gated to
+        # Wayland with no token, so it never runs on X11/Windows and auto-disables
+        # once a token is available (GNOME 48+ portal), where focus just works.
+        if (from_hotkey and _is_wayland() and not self._pending_activation_token
+                and self.isVisible()):
+            self.hide()
+            self._sync_mini_player()
+            QTimer.singleShot(300, lambda: self._spawn_add_word_dialog(
+                None, prefill, auto_translate, language1, fill_from_clipboard))
+            return
+        # Otherwise open the dialog without a parent when the main window isn't on
+        # screen, so it doesn't drag the main window up behind it.
         main_on_screen = self.isVisible() and not self.isMinimized()
         parent = self if main_on_screen else None
+        self._spawn_add_word_dialog(parent, prefill, auto_translate, language1,
+                                    fill_from_clipboard)
+
+    def _spawn_add_word_dialog(self, parent, prefill, auto_translate, language1,
+                               fill_from_clipboard=False):
+        from app.ui.dialogs.add_word import AddWordDialog
         dialog = AddWordDialog(parent, prefill=prefill, auto_translate=auto_translate,
                                language1=language1)
         dialog.word_saved.connect(self._after_db_change)
         if parent is None:
             self._open_dialogs["add_word"] = dialog  # keep it alive
         dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        self._activate_window_with_token(dialog)
+        if fill_from_clipboard:
+            # Read the clipboard now that the dialog has focus (see Wayland note in
+            # open_add_word_and_translate). Retry a few times in case keyboard focus
+            # / the selection offer lands a beat after the window is activated.
+            QTimer.singleShot(120, lambda: self._fill_add_word_from_clipboard(dialog))
+
+    def _fill_add_word_from_clipboard(self, dialog, attempts=4):
+        if dialog is None or not dialog.isVisible():
+            return
+        truncated = " ".join(QGuiApplication.clipboard().text().split()[:100])
+        if truncated.strip():
+            dialog.apply_prefill(truncated, auto_translate=True)
+        elif attempts > 1:
+            QTimer.singleShot(150, lambda: self._fill_add_word_from_clipboard(
+                dialog, attempts - 1))
+
+    def _activate_window_with_token(self, win):
+        """Raise/focus a window, consuming any xdg-activation token carried in from
+        a Wayland hotkey launch. Qt's Wayland backend redeems XDG_ACTIVATION_TOKEN
+        from the environment on the next activation request, so a token the desktop
+        issued to the launcher (and forwarded over our socket) lets the window take
+        focus instead of tripping focus-stealing prevention."""
+        token = self._pending_activation_token
+        self._pending_activation_token = None
+        if token:
+            os.environ["XDG_ACTIVATION_TOKEN"] = token
+        win.raise_()
+        win.activateWindow()
+        handle = win.windowHandle()
+        if handle is not None:
+            handle.requestActivate()
+        if token:
+            os.environ.pop("XDG_ACTIVATION_TOKEN", None)
 
     def _on_text_word_add(self, word, language):
         """A word clicked in the texts reader: capture it with translation."""
         self.open_add_word(prefill=word, auto_translate=True, language1=language)
 
-    def open_add_word_and_translate(self):
+    def open_add_word_and_translate(self, from_hotkey=False):
         clipboard = QGuiApplication.clipboard().text()
         words = clipboard.split()
         truncated = " ".join(words[:100])
-        self.open_add_word(prefill=truncated, auto_translate=bool(truncated.strip()))
+        # Wayland only lets the FOCUSED client read the clipboard. On a hotkey
+        # launch we're unfocused (the user is in another app), so the read above
+        # usually comes back empty — fill it in once the dialog has taken focus.
+        defer_clipboard = from_hotkey and _is_wayland() and not truncated.strip()
+        self.open_add_word(prefill=truncated, auto_translate=bool(truncated.strip()),
+                           from_hotkey=from_hotkey, fill_from_clipboard=defer_clipboard)
 
     def _after_db_change(self):
         self.load_data()

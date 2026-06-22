@@ -138,14 +138,23 @@ class AddWordDialog(FramelessDialog):
         self.word1_edit.setFocus()
 
         if prefill:
-            self.word1_edit.setText(prefill)
-            if language1 and self.lang1_combo.findData(language1) >= 0:
-                set_lang(self.lang1_combo, language1)
-            else:
-                set_lang(self.lang1_combo, "Detect language")
-            if len(prefill.split()) >= 100:
-                self._info(tr("The text was truncated to the first 100 words."))
-        if auto_translate and prefill:
+            self.apply_prefill(prefill, language1=language1, auto_translate=auto_translate)
+
+    def apply_prefill(self, text, language1=None, auto_translate=False):
+        """Fill the word field from text (e.g. the clipboard) and optionally
+        translate. Exposed so callers can populate the dialog AFTER it is shown —
+        needed on Wayland, where the clipboard is only readable once the dialog has
+        focus, so the hotkey flow fills it in post-show rather than at launch."""
+        if not text:
+            return
+        self.word1_edit.setText(text)
+        if language1 and self.lang1_combo.findData(language1) >= 0:
+            set_lang(self.lang1_combo, language1)
+        else:
+            set_lang(self.lang1_combo, "Detect language")
+        if len(text.split()) >= 100:
+            self._info(tr("The text was truncated to the first 100 words."))
+        if auto_translate:
             self.do_translate()
 
     # ------------------------------------------------------------------

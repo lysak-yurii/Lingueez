@@ -798,6 +798,15 @@ class SettingsDialog(FramelessDialog):
         hotkey_note.setObjectName("dimLabel")
         hotkey_note.setWordWrap(True)
         form.addRow(hotkey_note)
+        # On Wayland the global hotkey is registered with the desktop itself
+        # (it shows up under the system's keyboard shortcuts), so flag that.
+        if (os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+                or os.environ.get("WAYLAND_DISPLAY")):
+            wayland_note = QLabel(tr("On Wayland this shortcut is registered with your "
+                                     "desktop and appears in the system keyboard settings."))
+            wayland_note.setObjectName("dimLabel")
+            wayland_note.setWordWrap(True)
+            form.addRow(wayland_note)
 
         form.addRow(self._check("auto_check_updates", True,
                                 tr("Check for updates on startup")))

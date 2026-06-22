@@ -126,6 +126,27 @@ def _resolve_startup_language(settings):
     return detected
 
 
+def _forward_add_word(socket_name, activation_token=""):
+    """Tell the already-running instance to open the Add-Word dialog, over its
+    local socket. Forwards the desktop's xdg-activation token (if any) so the
+    dialog can take focus on Wayland. Returns True if the message was delivered."""
+    from PySide6.QtNetwork import QLocalSocket
+    logging.info(f"--add-word: forwarding to running instance; activation token "
+                 f"{'present' if activation_token else 'ABSENT'}")
+    sock = QLocalSocket()
+    sock.connectToServer(socket_name)
+    if not sock.waitForConnected(1000):
+        return False
+    msg = b"ADD_WORD"
+    if activation_token:
+        msg += b" " + activation_token.encode()
+    sock.write(msg + b"\n")
+    sock.flush()
+    sock.waitForBytesWritten(1000)
+    sock.disconnectFromServer()
+    return True
+
+
 def _setup_logging():
     logging.basicConfig(
         filename='app.log',
@@ -153,6 +174,11 @@ def main():
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     start_hidden = "--minimized" in sys.argv
+    # Capture the desktop's xdg-activation token BEFORE QApplication starts (Qt
+    # consumes/clears XDG_ACTIVATION_TOKEN on init). Used to focus the Add-Word
+    # dialog when launched from the Wayland global hotkey.
+    activation_token = (os.environ.get("XDG_ACTIVATION_TOKEN")
+                        or os.environ.get("DESKTOP_STARTUP_ID") or "")
 
     app = QApplication(sys.argv)
     # applicationName becomes the X11 WM_CLASS — must match StartupWMClass
@@ -175,7 +201,13 @@ def main():
     # still shutting down and holding the lock, so wait for it to free up rather
     # than refusing to start.
     lock_wait = 8000 if "--relaunch" in sys.argv else 100
+    add_word = "--add-word" in sys.argv
     if not lock.tryLock(lock_wait):
+        # An instance is already running. If we were launched by the global
+        # Add-Word hotkey (e.g. a Wayland desktop keybinding), forward the request
+        # to it over the local socket and exit quietly instead of warning.
+        if add_word and _forward_add_word(f"{APP_ID}-add-word", activation_token):
+            return 0
         QMessageBox.warning(None, APP_NAME, f"{APP_NAME} is already running.")
         return 0
 
@@ -218,8 +250,12 @@ def main():
                       settings.get("appearance_mode", "System"),
                       get_float(settings, "widget_scaling", 1.0))
 
-    window = MainWindow(settings, start_hidden=start_hidden)
-    if not start_hidden:
+    # Cold start via the Add-Word hotkey (no instance was running): stay hidden in
+    # the tray and just open the Add-Word dialog (parentless, self-focusing), so the
+    # main window doesn't appear behind it — matching the running-app hotkey flow.
+    window = MainWindow(settings, start_hidden=start_hidden or add_word,
+                        open_add_word=add_word, activation_token=activation_token)
+    if not (start_hidden or add_word):
         window.show()
 
     rc = app.exec()
