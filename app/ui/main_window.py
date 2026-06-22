@@ -52,6 +52,7 @@ from app.core import translator
 from app.core.audio import stop_playback
 from app.core.backup_management import backup_database
 from app.core.database_adapter import DatabaseAdapter
+from app.core.errors import DuplicateWordError
 from app.core.shell_utils import suggest_filename
 from app.core.sync_manager import SyncManager, SyncError
 from app.core.auth_manager import get_auth_manager
@@ -2435,6 +2436,7 @@ class MainWindow(QMainWindow):
         dialog = AddWordDialog(parent, prefill=prefill, auto_translate=auto_translate,
                                language1=language1)
         dialog.word_saved.connect(self._after_db_change)
+        dialog.open_existing.connect(self.select_word_by_id)
         if parent is None:
             self._open_dialogs["add_word"] = dialog  # keep it alive
         dialog.show()
@@ -2491,6 +2493,26 @@ class MainWindow(QMainWindow):
     def _after_db_change(self):
         self.load_data()
 
+    def select_word_by_id(self, word_id):
+        """Bring an existing word into view and highlight it. Surfaces the main
+        window (it may be hidden in the tray / minimized when the Add Word dialog
+        was opened by hotkey or tray), switches to the Words page, clears any
+        active filters/search so the row can't be hidden, then selects, scrolls to
+        and glow-flashes it. Used when the user opts to show an entry that already
+        exists instead of adding a duplicate."""
+        if not word_id:
+            return
+        self.show_window()
+        self.switch_page(PAGE_WORDS, animate=False)
+        self._clear_word_filters()
+        rows = self.model.flash_words([word_id])
+        if not rows:
+            return
+        row = rows[0]
+        self.table.selectRow(row)
+        self.table.scrollTo(self.model.index(row, COL_WORD1),
+                            QAbstractItemView.PositionAtCenter)
+
     def _flash_new_words(self):
         """Glow-highlight any words that appeared since the last vocabulary load —
         whether added by hand, pulled in by sync, or imported. Skips the very
@@ -2528,6 +2550,11 @@ class MainWindow(QMainWindow):
                 backup_database()
                 self.load_data()
                 show_toast(self, tr("Saved"), tr("'{word}' updated.").format(word=updated.get('Word1', '')), "success")
+            except DuplicateWordError as exc:
+                QMessageBox.information(
+                    self, tr("Already in your dictionary"),
+                    tr("'{word}' is already in your dictionary.").format(
+                        word=f"{exc.word1} – {exc.word2}"))
             except Exception as exc:
                 logging.error(f"Error updating row: {exc}")
                 QMessageBox.critical(self, tr("Error"), tr("Failed to update: {error}").format(error=exc))

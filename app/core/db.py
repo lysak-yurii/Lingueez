@@ -183,6 +183,15 @@ def initialize_database(db_path=None):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
+    # Write-Ahead Logging lets a reader and a writer coexist instead of blocking
+    # each other, sharply reducing "database is locked" contention with the
+    # background sync thread. The setting is persistent per database file, so
+    # stamping it once at init is enough.
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.Error as exc:
+        logging.warning(f"Could not enable WAL on {db_path}: {exc}")
+
     # Primary keys are UUIDv4 strings (TEXT), generated client-side and shared
     # verbatim with the Supabase mirror — see the module docstring. The four
     # cloud-mirrored tables are defined by helpers so initialize and migrate share

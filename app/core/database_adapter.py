@@ -20,9 +20,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import sqlite3
+from contextlib import contextmanager
 from typing import Optional, List, Dict, Any
 from app.core.supabase_client import SupabaseClient, get_supabase
 from app.core.db import new_id
+from app.core.errors import DuplicateWordError
 import logging
 import os
 import json
@@ -67,6 +69,30 @@ class DatabaseAdapter:
     def _use_cloud(self) -> bool:
         """Check if cloud should be used for this operation."""
         return self.use_cloud and self.cloud_available
+
+    def _connect(self) -> sqlite3.Connection:
+        """Open a SQLite connection with a busy timeout so concurrent writers
+        (e.g. the background sync thread) wait-and-retry instead of failing
+        immediately with 'database is locked'."""
+        conn = sqlite3.connect(self.local_db)
+        conn.execute("PRAGMA busy_timeout = 5000")
+        return conn
+
+    @contextmanager
+    def _write(self):
+        """Transactional write scope: commits on success, rolls back on any
+        error, and ALWAYS closes the connection. This guarantees a failed write
+        (e.g. a UNIQUE constraint violation) can never leave an open transaction
+        holding a lock on the database file."""
+        conn = self._connect()
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def set_use_cloud(self, enabled: bool):
         """Enable/disable cloud use at runtime without replacing the adapter
@@ -858,10 +884,10 @@ class DatabaseAdapter:
         return local_result
     
     def _insert_word_sqlite(self, word_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Insert a word into SQLite."""
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
-        
+        """Insert a word into SQLite.
+
+        Raises DuplicateWordError if the (Word1, Word2) pair already exists.
+        """
         # Extract fields, handling both dict and direct values
         language1 = word_data.get('Language1', word_data.get('language1'))
         word1 = word_data.get('Word1', word_data.get('word1'))
@@ -869,25 +895,49 @@ class DatabaseAdapter:
         word2 = word_data.get('Word2', word_data.get('word2'))
         status = word_data.get('Status', word_data.get('status'))
         source = word_data.get('Source', word_data.get('source', ''))
-        
+
         # Explicitly set created_at to ensure consistent ordering
         from datetime import datetime
         created_at = word_data.get('created_at')
         if not created_at:
             created_at = datetime.now(timezone.utc).isoformat()
-        
+
         # The id is a client-generated UUID shared verbatim with the cloud.
         word_id = new_id()
-        cursor.execute('''
-            INSERT INTO words (ID, Language1, Word1, Language2, Word2, Status, Source, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (word_id, language1, word1, language2, word2, status, source, created_at))
-
-        conn.commit()
-        conn.close()
+        try:
+            with self._write() as conn:
+                conn.execute('''
+                    INSERT INTO words (ID, Language1, Word1, Language2, Word2, Status, Source, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (word_id, language1, word1, language2, word2, status, source, created_at))
+        except sqlite3.IntegrityError as exc:
+            raise self._as_duplicate_word_error(exc, word1, word2)
 
         # Return the inserted word
         return self._get_word_sqlite(word_id)
+
+    def _as_duplicate_word_error(self, exc: sqlite3.IntegrityError,
+                                 word1: str, word2: str) -> Exception:
+        """Map a UNIQUE(Word1, Word2) violation to a DuplicateWordError carrying
+        the existing row's ID; re-raise anything else unchanged."""
+        msg = str(exc)
+        if "UNIQUE constraint failed" in msg and "Word1" in msg and "Word2" in msg:
+            return DuplicateWordError(word1, word2, self._find_word_id_by_content(word1, word2))
+        return exc
+
+    def _find_word_id_by_content(self, word1: str, word2: str) -> Optional[str]:
+        """Return the ID of the word with this exact (Word1, Word2) pair, if any."""
+        try:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT ID FROM words WHERE Word1 = ? AND Word2 = ?",
+                    (word1, word2)).fetchone()
+                return row[0] if row else None
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return None
     
     def _compare_timestamps(self, ts1: Optional[str], ts2: Optional[str]) -> int:
         """Compare two timestamps. Returns -1 if ts1 < ts2, 0 if equal, 1 if ts1 > ts2."""
@@ -982,32 +1032,37 @@ class DatabaseAdapter:
         return local_result
     
     def _update_word_sqlite(self, word_id: int, word_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Update a word in SQLite."""
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
-        
+        """Update a word in SQLite.
+
+        Raises DuplicateWordError if the edit renames the word onto an existing
+        (Word1, Word2) pair.
+        """
         # Build update query dynamically
         updates = []
         values = []
-        
+
         for key in ['Language1', 'Word1', 'Language2', 'Word2', 'Status', 'Source',
                    'Definition', 'Definition2', 'favorite']:
             if key in word_data:
                 updates.append(f"{key} = ?")
                 values.append(word_data[key])
-        
+
         # Always update edited_at
         from datetime import datetime
         updates.append("edited_at = ?")
         values.append(datetime.now(timezone.utc).isoformat())
         values.append(word_id)
-        
+
         if updates:
             query = f"UPDATE words SET {', '.join(updates)} WHERE ID = ?"
-            cursor.execute(query, values)
-            conn.commit()
-        
-        conn.close()
+            try:
+                with self._write() as conn:
+                    conn.execute(query, values)
+            except sqlite3.IntegrityError as exc:
+                word1 = word_data.get('Word1', word_data.get('word1'))
+                word2 = word_data.get('Word2', word_data.get('word2'))
+                raise self._as_duplicate_word_error(exc, word1, word2)
+
         return self._get_word_sqlite(word_id)
     
     def _rekey_word_sqlite(self, old_id: str, new_id: str) -> None:
@@ -1019,29 +1074,25 @@ class DatabaseAdapter:
         """
         if not old_id or not new_id or old_id == new_id:
             return
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
         try:
-            cursor.execute("PRAGMA foreign_keys = OFF")
-            # If the target id already exists locally (both pairs present), drop the
-            # duplicate we just made rather than violating the primary key.
-            cursor.execute("SELECT 1 FROM words WHERE ID = ?", (new_id,))
-            if cursor.fetchone():
-                cursor.execute("DELETE FROM word_tags WHERE word_id = ?", (old_id,))
-                cursor.execute("DELETE FROM words WHERE ID = ?", (old_id,))
-            else:
-                cursor.execute("UPDATE words SET ID = ? WHERE ID = ?", (new_id, old_id))
-                cursor.execute("UPDATE OR IGNORE word_tags SET word_id = ? WHERE word_id = ?",
+            with self._write() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA foreign_keys = OFF")
+                # If the target id already exists locally (both pairs present), drop the
+                # duplicate we just made rather than violating the primary key.
+                cursor.execute("SELECT 1 FROM words WHERE ID = ?", (new_id,))
+                if cursor.fetchone():
+                    cursor.execute("DELETE FROM word_tags WHERE word_id = ?", (old_id,))
+                    cursor.execute("DELETE FROM words WHERE ID = ?", (old_id,))
+                else:
+                    cursor.execute("UPDATE words SET ID = ? WHERE ID = ?", (new_id, old_id))
+                    cursor.execute("UPDATE OR IGNORE word_tags SET word_id = ? WHERE word_id = ?",
+                                   (new_id, old_id))
+                cursor.execute("UPDATE review_events SET word_id = ? WHERE word_id = ?",
                                (new_id, old_id))
-            cursor.execute("UPDATE review_events SET word_id = ? WHERE word_id = ?",
-                           (new_id, old_id))
-            conn.commit()
             logging.info(f"Re-keyed local word {old_id} -> {new_id} (cloud collision)")
         except Exception as e:
             logging.error(f"Error re-keying word {old_id} -> {new_id}: {e}")
-            conn.rollback()
-        finally:
-            conn.close()
     
     def delete_word(self, word_id: str) -> bool:
         """Delete a word locally and (soft-delete) in the cloud by its shared id."""
@@ -1078,12 +1129,9 @@ class DatabaseAdapter:
     
     def _delete_word_sqlite(self, word_id: int) -> bool:
         """Delete a word from SQLite, including its tag links."""
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM word_tags WHERE word_id = ?", (word_id,))
-        cursor.execute("DELETE FROM words WHERE ID = ?", (word_id,))
-        conn.commit()
-        conn.close()
+        with self._write() as conn:
+            conn.execute("DELETE FROM word_tags WHERE word_id = ?", (word_id,))
+            conn.execute("DELETE FROM words WHERE ID = ?", (word_id,))
         return True
     
     # Texts operations
@@ -1189,9 +1237,6 @@ class DatabaseAdapter:
     
     def _insert_text_sqlite(self, text_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Insert a text into SQLite."""
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
-        
         row_number = text_data.get('RowNumber', text_data.get('row_number'))
         title = text_data.get('Title', text_data.get('title'))
         text = text_data.get('Text', text_data.get('text'))
@@ -1201,13 +1246,11 @@ class DatabaseAdapter:
         level = text_data.get('Level', text_data.get('level'))
 
         text_id = new_id()
-        cursor.execute('''
-            INSERT INTO texts (ID, RowNumber, Title, Text, Words, Language, Category, Level, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ''', (text_id, row_number, title, text, words, language, category, level))
-
-        conn.commit()
-        conn.close()
+        with self._write() as conn:
+            conn.execute('''
+                INSERT INTO texts (ID, RowNumber, Title, Text, Words, Language, Category, Level, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ''', (text_id, row_number, title, text, words, language, category, level))
 
         return self._get_text_sqlite(text_id)
     
@@ -1240,28 +1283,24 @@ class DatabaseAdapter:
     
     def _update_text_sqlite(self, text_id: int, text_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update a text in SQLite."""
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
-        
         updates = []
         values = []
-        
+
         for key in ['RowNumber', 'Title', 'Text', 'Words', 'Language', 'Category', 'Level']:
             if key in text_data:
                 updates.append(f"{key} = ?")
                 values.append(text_data[key])
-        
+
         from datetime import datetime
         updates.append("edited_at = ?")
         values.append(datetime.now(timezone.utc).isoformat())
         values.append(text_id)
-        
+
         if updates:
             query = f"UPDATE texts SET {', '.join(updates)} WHERE ID = ?"
-            cursor.execute(query, values)
-            conn.commit()
-        
-        conn.close()
+            with self._write() as conn:
+                conn.execute(query, values)
+
         return self._get_text_sqlite(text_id)
     
     def delete_text(self, text_id: int) -> bool:
@@ -1297,11 +1336,8 @@ class DatabaseAdapter:
     
     def _delete_text_sqlite(self, text_id: int) -> bool:
         """Delete a text from SQLite."""
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM texts WHERE ID = ?", (text_id,))
-        conn.commit()
-        conn.close()
+        with self._write() as conn:
+            conn.execute("DELETE FROM texts WHERE ID = ?", (text_id,))
         return True
     
     def restore_word(self, word_id: int) -> bool:
@@ -1434,9 +1470,6 @@ class DatabaseAdapter:
     
     def _insert_word_sqlite_with_id(self, word_data: Dict[str, Any], word_id: int) -> Optional[Dict[str, Any]]:
         """Insert a word into SQLite with a specific ID (for restoring)."""
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
-        
         # Extract fields, handling both dict and direct values
         language1 = word_data.get('Language1', word_data.get('language1'))
         word1 = word_data.get('Word1', word_data.get('word1'))
@@ -1454,26 +1487,23 @@ class DatabaseAdapter:
         if not created_at:
             created_at = datetime.now(timezone.utc).isoformat()
         edited_at = word_data.get('edited_at')
-        
+
         try:
-            cursor.execute('''
-                INSERT INTO words (ID, Language1, Word1, Language2, Word2, Status, Source,
-                                 Definition, Definition2, RowNumber, favorite, created_at, edited_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (word_id, language1, word1, language2, word2, status, source,
-                  definition, definition2, row_number, favorite, created_at, edited_at))
-            conn.commit()
-        finally:
-            conn.close()
+            with self._write() as conn:
+                conn.execute('''
+                    INSERT INTO words (ID, Language1, Word1, Language2, Word2, Status, Source,
+                                     Definition, Definition2, RowNumber, favorite, created_at, edited_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (word_id, language1, word1, language2, word2, status, source,
+                      definition, definition2, row_number, favorite, created_at, edited_at))
+        except sqlite3.IntegrityError as exc:
+            raise self._as_duplicate_word_error(exc, word1, word2)
 
         # Return the inserted word
         return self._get_word_sqlite(word_id)
     
     def _insert_text_sqlite_with_id(self, text_data: Dict[str, Any], text_id: int) -> Optional[Dict[str, Any]]:
         """Insert a text into SQLite with a specific ID (for restoring)."""
-        conn = sqlite3.connect(self.local_db)
-        cursor = conn.cursor()
-        
         row_number = text_data.get('RowNumber', text_data.get('row_number'))
         title = text_data.get('Title', text_data.get('title'))
         text = text_data.get('Text', text_data.get('text'))
@@ -1488,14 +1518,11 @@ class DatabaseAdapter:
             created_at = datetime.now(timezone.utc).isoformat()
         edited_at = text_data.get('edited_at')
 
-        try:
-            cursor.execute('''
+        with self._write() as conn:
+            conn.execute('''
                 INSERT INTO texts (ID, RowNumber, Title, Text, Words, Language, Category, Level, created_at, edited_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (text_id, row_number, title, text, words, language, category, level, created_at, edited_at))
-            conn.commit()
-        finally:
-            conn.close()
 
         return self._get_text_sqlite(text_id)
     

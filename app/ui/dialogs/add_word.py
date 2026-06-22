@@ -33,6 +33,7 @@ from app.config import get_bool, load_settings
 from app.core.audio import speak_word
 from app.core.backup_management import backup_database
 from app.core.database_adapter import DatabaseAdapter
+from app.core.errors import DuplicateWordError
 from app.core.translator import DEEPL_LANGUAGE_CODES, translate
 from app.i18n import fill_lang_combo, get_lang, lang_label, set_lang, tr
 from app.ui import icons
@@ -42,6 +43,9 @@ from app.ui.workers import run_in_thread
 
 class AddWordDialog(FramelessDialog):
     word_saved = Signal()
+    # Emitted (with the existing word's ID) when the user chooses to open an
+    # already-existing entry instead of adding a duplicate.
+    open_existing = Signal(str)
 
     def __init__(self, parent, prefill=None, auto_translate=False, language1=None):
         super().__init__(parent, title=tr("Add Word"))
@@ -228,17 +232,34 @@ class AddWordDialog(FramelessDialog):
             return
 
         try:
-            result = self.db_adapter.insert_word({
+            self.db_adapter.insert_word({
                 'Language1': lang1, 'Word1': word1,
                 'Language2': lang2, 'Word2': word2,
                 'Status': 'New', 'Source': 'manual',
             })
-            if not result:
-                self._info(tr("'{word}' already exists in your dictionary.").format(word=f"{word1} – {word2}"))
-                return
             backup_database()
             self.word_saved.emit()
             self.accept()
+        except DuplicateWordError as exc:
+            self._handle_duplicate(exc)
         except Exception as exc:
             logging.error(f"Error saving new word: {exc}")
             QMessageBox.critical(self, tr("Error"), tr("Failed to save word:\n{error}").format(error=exc))
+
+    def _handle_duplicate(self, exc: DuplicateWordError):
+        """A word with this spelling already exists — offer to open it."""
+        pair = f"{exc.word1} – {exc.word2}"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle(tr("Already in your dictionary"))
+        box.setText(tr("'{word}' is already in your dictionary.").format(word=pair))
+        if exc.existing_id:
+            open_btn = box.addButton(tr("Show existing"), QMessageBox.AcceptRole)
+            box.addButton(tr("Cancel"), QMessageBox.RejectRole)
+            box.exec()
+            if box.clickedButton() is open_btn:
+                self.open_existing.emit(exc.existing_id)
+                self.accept()
+        else:
+            box.addButton(tr("OK"), QMessageBox.AcceptRole)
+            box.exec()

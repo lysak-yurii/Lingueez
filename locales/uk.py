@@ -401,6 +401,9 @@ TRANSLATIONS: dict[str, str] = {
     "Both word and translation are required.": "Потрібні обидва: слово та переклад.",
     "Please select the source language before saving.": "Будь ласка, виберіть мову джерела перед збереженням.",
     "'{word}' already exists in your dictionary.": "«{word}» вже є у вашому словнику.",
+    "'{word}' is already in your dictionary.": "«{word}» вже є у вашому словнику.",
+    "Already in your dictionary": "Уже у вашому словнику",
+    "Show existing": "Показати наявне",
     "The text was truncated to the first 100 words.": "Текст скорочено до перших 100 слів.",
 
     # ── definition.py ──────────────────────────────────────────────────────

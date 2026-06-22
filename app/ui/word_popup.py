@@ -40,6 +40,7 @@ from app.config import load_settings, save_settings
 from app.core import ai
 from app.i18n import lang_label, tr
 from app.core.backup_management import backup_database
+from app.core.errors import DuplicateWordError
 from app.core.translator import DEEPL_LANGUAGE_CODES, translate
 from app.ui import icons
 from app.ui.toast import show_toast
@@ -217,12 +218,19 @@ class WordPopup(QFrame):
     # --------------------------------------------------------------- save
 
     def _insert(self, word1, word2):
-        """Insert on the worker thread; returns (inserted, word1, word2)."""
-        result = self.db_adapter.insert_word({
-            'Language1': self._language, 'Word1': word1,
-            'Language2': self._target(), 'Word2': word2,
-            'Status': 'New', 'Source': 'reader',
-        })
+        """Insert on the worker thread; returns (inserted, word1, word2).
+
+        A duplicate is a normal outcome here (the user re-clicked a known word),
+        so swallow DuplicateWordError and report it as not-inserted rather than
+        letting it surface as an error toast."""
+        try:
+            result = self.db_adapter.insert_word({
+                'Language1': self._language, 'Word1': word1,
+                'Language2': self._target(), 'Word2': word2,
+                'Status': 'New', 'Source': 'reader',
+            })
+        except DuplicateWordError:
+            return False, word1, word2
         if result:
             backup_database()
         return bool(result), word1, word2

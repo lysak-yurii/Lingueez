@@ -14,12 +14,22 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-# Additional terms under AGPL-3.0 section 7 apply to this program; see the
-# NOTICE file distributed with this source for details.
-#
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-APP_VERSION = "2.0.0"
-BUILD_NUMBER = "2026062211"
-APP_NAME = "Lingueez"
-APP_ID = "Lingueez"  # WM_CLASS / desktop-file basename
+"""Domain-level exceptions shared between the data layer and the UI."""
+
+from typing import Optional
+
+
+class DuplicateWordError(Exception):
+    """Raised when a write would violate the UNIQUE(Word1, Word2) constraint.
+
+    Carries the offending word pair and, when known, the ID of the existing row
+    so the UI can offer to open it instead of showing a raw constraint error.
+    """
+
+    def __init__(self, word1: str, word2: str, existing_id: Optional[str] = None):
+        self.word1 = word1
+        self.word2 = word2
+        self.existing_id = existing_id
+        super().__init__(f"{word1} – {word2} already exists")
