@@ -44,6 +44,11 @@ ICONS = {
     "rotate-ccw": '<polyline points="1 4 1 10 7 10"/>'
                   '<path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
     "clock": '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    "bold": '<path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/>',
+    "italic": '<line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/>'
+              '<line x1="15" y1="4" x2="9" y2="20"/>',
+    "type": '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/>'
+            '<line x1="12" y1="4" x2="12" y2="20"/>',
     "star": '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 '
             '5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
     "star-filled": '<polygon fill="{color}" points="12 2 15.09 8.26 22 9.27 17 14.14 '
