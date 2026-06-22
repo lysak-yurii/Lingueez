@@ -123,18 +123,25 @@ class FramelessResizer(QObject):
     def _edges_at(self, global_pos):
         if self._window.isMaximized() or self._window.isFullScreen():
             return Qt.Edges()
-        geo = self._window.frameGeometry()
-        if not geo.contains(global_pos):
+        # Work in the window's own coordinates. A frameless window's
+        # frameGeometry() is unreliable on some platforms (fractional scaling,
+        # Wayland CSD shadow margins): it reports a position/size that doesn't
+        # match the rendered surface, which pushed the resize bands inside the
+        # window. mapFromGlobal() + the live width()/height() always describe
+        # what's actually drawn, so the edges line up with the visible border.
+        local = self._window.mapFromGlobal(global_pos)
+        x, y = local.x(), local.y()
+        w, h = self._window.width(), self._window.height()
+        if not (0 <= x <= w and 0 <= y <= h):
             return Qt.Edges()
-        x, y = global_pos.x(), global_pos.y()
         edges = Qt.Edges()
-        if x <= geo.left() + RESIZE_MARGIN:
+        if x <= RESIZE_MARGIN:
             edges |= Qt.LeftEdge
-        if x >= geo.right() - RESIZE_MARGIN:
+        if x >= w - RESIZE_MARGIN:
             edges |= Qt.RightEdge
-        if y <= geo.top() + RESIZE_MARGIN:
+        if y <= RESIZE_MARGIN:
             edges |= Qt.TopEdge
-        if y >= geo.bottom() - RESIZE_MARGIN:
+        if y >= h - RESIZE_MARGIN:
             edges |= Qt.BottomEdge
         return edges
 
