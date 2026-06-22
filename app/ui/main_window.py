@@ -58,6 +58,7 @@ from app.core.supabase_client import is_custom_server
 from app.core.data_management import open_words_from_excel
 from app.ui import icons, theme
 from app.ui.animations import AnimatedStackedWidget, crossfade_during, fade_swap
+from app.ui.brand_wordmark import BrandWordmark
 from app.ui.mini_player import MiniPlayer
 from app.ui.player import PlaybackSettingsPopup, PlayerBar, WordPlayer
 from app.ui.texts_page import TextsPage
@@ -452,6 +453,7 @@ class MainWindow(QMainWindow):
         self._apply_menu_button_icon()
         self._update_more_filters_active()  # keep the Filters chip tint in sync
         self.search_field.refresh_theme(self.colors)
+        self._title_mark.set_colors(self.colors)
 
     def _rebuild_app_menu(self):
         """Swap in a freshly built app menu (theme change / update-state change)."""
@@ -609,8 +611,10 @@ class MainWindow(QMainWindow):
         title_box = QVBoxLayout(self._title_widget)
         title_box.setContentsMargins(0, 0, 0, 0)
         title_box.setSpacing(0)
-        title = QLabel(APP_NAME, objectName="AppTitle")  # short; never truncates
-        title_box.addWidget(title)
+        # Animated brand wordmark: tracks in with a sheen sweep on each launch
+        # (see BrandWordmark), then a soft sheen keeps passing while running.
+        self._title_mark = BrandWordmark(APP_NAME, self.colors)
+        title_box.addWidget(self._title_mark)
 
         subtitle_row = QHBoxLayout()
         subtitle_row.setSpacing(6)
@@ -1083,6 +1087,8 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._apply_responsive_columns)
         self._apply_responsive_header()
         self._apply_toolbar_layout()
+        # Play the brand wordmark's track-in + sheen once per launch.
+        self._title_mark.play()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
