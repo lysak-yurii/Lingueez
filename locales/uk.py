@@ -433,8 +433,6 @@ TRANSLATIONS: dict[str, str] = {
 
     # ── bin_window.py ──────────────────────────────────────────────────────
     "Bin — Deleted Items": "Кошик — Видалені елементи",
-    "Deleted at": "Дата видалення",
-    "Restore Selected": "Відновити вибрані",
     "Delete Permanently": "Видалити назавжди",
     "Cleanup Old Items…": "Очистити старі елементи…",
     "{n} selected": "{n} вибрано",
@@ -634,7 +632,6 @@ TRANSLATIONS: dict[str, str] = {
     "Sync Now": "Синхронізувати",
     "Syncing…": "Синхронізується…",
     # Local-only promo state
-    "Back up your vocabulary": "Резервна копія вашого словника",
     "{words} and {texts}": "{words} і {texts}",
     "You've saved {items} here. Sign in to keep them safe and study on all your devices.":
         "Збережено {items}. Увійдіть, щоб не втратити їх та мати змогу навчатися на всіх пристроях.",
@@ -948,9 +945,6 @@ TRANSLATIONS: dict[str, str] = {
     "Restore {count} item(s)?": "Відновити {count} елемент(ів)?",
     "Restored {count} item(s).": "Відновлено {count} елемент(ів).",
     "Select item(s) to restore.": "Виберіть елемент(и) для відновлення.",
-    "Permanently delete {count} item(s)?\n\nThis cannot be undone!": (
-        "Остаточно видалити {count} елемент(ів)?\n\nЦю дію не можна скасувати!"
-    ),
     "Permanently deleted {count} item(s).": "Остаточно видалено {count} елемент(ів).",
     "Select item(s) to delete permanently.": "Виберіть елемент(и) для остаточного видалення.",
     "No items older than {n} days found.": "Елементів, старших за {n} днів, не знайдено.",
