@@ -180,6 +180,16 @@ class AnimatedAppIcon(QWidget):
         float_anim.start()
         self._float = float_anim
 
+    def stop_animations(self):
+        """Stop every animation so the looping float doesn't keep ticking on Qt's
+        global animation timer after the dialog closes. Left running it dangles once
+        the dialog is torn down and crashes QUnifiedTimer (a use-after-free);
+        stopping unregisters them synchronously, making teardown safe."""
+        for name in ("_fade", "_entrance", "_landing", "_float"):
+            anim = getattr(self, name, None)
+            if anim is not None:
+                anim.stop()
+
 
 class WelcomeDialog(FramelessDialog):
     """Skippable first-run sync pitch. exec() is truthy when the user chose to
@@ -260,6 +270,16 @@ class WelcomeDialog(FramelessDialog):
         if getattr(self, "_icon", None) is not None and not getattr(self, "_icon_played", False):
             self._icon_played = True
             self._icon.play()
+
+    def done(self, result):
+        # Halt the icon's animations the instant the user dismisses this dialog —
+        # before the caller (MainWindow._show_welcome) immediately opens the sign-in
+        # dialog. The icon's resting float loops forever; left running it would keep
+        # ticking on the global animation timer and dangle once this dialog is torn
+        # down, crashing the sign-in dialog's event loop (QUnifiedTimer use-after-free).
+        if getattr(self, "_icon", None) is not None:
+            self._icon.stop_animations()
+        super().done(result)
 
     def _benefit_row(self, icon_name, head, sub, *, divider):
         """A quiet_row whose primary cell stacks a bold heading over a dim line."""
