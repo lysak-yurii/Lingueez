@@ -4179,6 +4179,9 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QPixmap
         from app.core.updater import GITHUB_URL
         from app.ui.dialogs.base import FramelessDialog
+        from app.ui.legal_links import host_reachable, open_legal
+        from app.ui.workers import run_in_thread
+        from app.version import (CONTACT_EMAIL, PRIVACY_URL, TERMS_URL, WEBSITE_URL)
 
         dialog = FramelessDialog(self, title=f"{tr('About')} {APP_NAME}")
         dialog.setMinimumWidth(460)
@@ -4218,7 +4221,7 @@ class MainWindow(QMainWindow):
         desc.setWordWrap(True)
         dialog.content_layout.addWidget(desc)
 
-        # --- Legal ---
+        # --- Legal attribution (AGPL §7 — must be preserved) ---
         legal = QLabel(
             "© 2024–2026 Yurii Lysak<br>"
             + tr("Licensed under the GNU Affero General Public License v3.0. "
@@ -4227,27 +4230,64 @@ class MainWindow(QMainWindow):
         legal.setWordWrap(True)
         dialog.content_layout.addWidget(legal)
 
-        # --- Links: source code / report an issue ---
-        links = QHBoxLayout()
+        # --- Legal / contact as a quiet inline link row; the heavier dev actions
+        # (source / report) stay as buttons below. Website is appended only if the
+        # domain is reachable. ---
+        accent, dim = dialog.colors["accent"], dialog.colors["text_dim"]
+
+        def _anchor(href, text):
+            return f'<a href="{href}" style="color:{accent}; text-decoration:none;">{text}</a>'
+
+        def _links_html(with_website):
+            parts = [_anchor(PRIVACY_URL, tr("Privacy Policy")),
+                     _anchor(TERMS_URL, tr("Terms")),
+                     _anchor("mailto:" + CONTACT_EMAIL, tr("Contact"))]
+            if with_website:
+                parts.append(_anchor(WEBSITE_URL, tr("Website")))
+            return f' <span style="color:{dim}">·</span> '.join(parts)
+
+        def _open_link(href):
+            if href in (PRIVACY_URL, TERMS_URL):
+                open_legal(href)  # keep the GitHub failover
+            else:
+                QDesktopServices.openUrl(QUrl(href))  # mailto / website
+
+        links = QLabel(_links_html(False))
+        links.setOpenExternalLinks(False)
+        links.linkActivated.connect(_open_link)
+        dialog.content_layout.addWidget(links)
+
+        # Append the Website link only if lingueez.app actually serves something. The
+        # probe runs off-thread; its result lands on the GUI thread during exec().
+        def _reveal(ok):
+            try:
+                if ok:
+                    links.setText(_links_html(True))
+            except RuntimeError:
+                pass
+        run_in_thread(lambda: host_reachable(WEBSITE_URL), on_result=_reveal)
+
+        # --- Developer links kept as buttons (the previous style) ---
+        btns = QHBoxLayout()
         source = QPushButton(tr("Source code"), objectName="tonalButton")
         source.setCursor(Qt.PointingHandCursor)
         source.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(GITHUB_URL)))
-        links.addWidget(source)
+        btns.addWidget(source)
         report = QPushButton(tr("Report an issue"), objectName="tonalButton")
         report.setCursor(Qt.PointingHandCursor)
         report.clicked.connect(self._report_an_issue)
-        links.addWidget(report)
-        links.addStretch(1)
-        dialog.content_layout.addLayout(links)
+        btns.addWidget(report)
+        btns.addStretch(1)
+        dialog.content_layout.addLayout(btns)
 
-        # --- Actions: check for updates / OK ---
+        # --- Actions: check for updates / Close ---
         row = QHBoxLayout()
         check = QPushButton(tr("Check for updates"))
         check.setCursor(Qt.PointingHandCursor)
         check.clicked.connect(lambda: self._check_for_updates(manual=True))
         row.addWidget(check)
         row.addStretch(1)
-        ok = QPushButton(tr("OK"), objectName="primaryButton")
+        ok = QPushButton(tr("Close"), objectName="primaryButton")
         ok.setCursor(Qt.PointingHandCursor)
         ok.setDefault(True)
         ok.clicked.connect(dialog.accept)

@@ -20,6 +20,23 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 APP_VERSION = "2.0.0"
-BUILD_NUMBER = "2026062303"
+BUILD_NUMBER = "2026062401"
 APP_NAME = "Lingueez"
 APP_ID = "Lingueez"  # WM_CLASS / desktop-file basename
+
+# Hosted legal docs: primary (custom domain) + GitHub-repo fallback, picked by
+# app/ui/legal_links.py when the primary is unreachable.
+PRIVACY_URL = "https://lingueez.app/legal/privacy-policy"
+TERMS_URL = "https://lingueez.app/legal/terms-of-service"
+PRIVACY_URL_FALLBACK = "https://github.com/lysak-yurii/Lingueez/blob/main/docs/legal/privacy-policy.md"
+TERMS_URL_FALLBACK = "https://github.com/lysak-yurii/Lingueez/blob/main/docs/legal/terms-of-service.md"
+
+# Website + contact (shown in the About dialog). The Website link only appears when
+# the domain is actually reachable.
+WEBSITE_URL = "https://lingueez.app"
+CONTACT_EMAIL = "support@lingueez.app"
+
+# Bumped whenever the Terms/Privacy change materially enough to require users to
+# re-accept. The stored "policy_accepted_version" is compared against this; a higher
+# value here re-triggers the consent gate at the next account creation.
+POLICY_VERSION = "1.0"

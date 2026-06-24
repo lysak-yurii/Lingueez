@@ -216,6 +216,10 @@ DEFAULTS = {
     "addtext_level": "",              # last-used CEFR level in the Add Text dialog
     # Add Word dialog
     "addword_target_language": "",    # last-used translation (target) language
+    # Legal consent: the Terms/Privacy version accepted on this device (compared
+    # against app.version.POLICY_VERSION) and when. Empty until first acceptance.
+    "policy_accepted_version": "",
+    "policy_accepted_at": "",
     # Sync
     "enable_sync": "False",
     "cleanup_grace_period_days": "30",

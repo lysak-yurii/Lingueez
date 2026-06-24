@@ -45,3 +45,5 @@ ffmpeg/
 *.spec
 !lingueez.spec
 import_test_scenarios.xlsx
+
+docs/legal/README.md

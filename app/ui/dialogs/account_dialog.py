@@ -30,14 +30,19 @@ results come back as ``(ok, message)`` tuples and are surfaced via toast. Emits
 :attr:`authenticated` once a session is established so the main window / settings can
 refresh their account status.
 """
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLayout, QLineEdit, QPushButton
+from datetime import datetime, timezone
 
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QLayout, QLineEdit,
+                               QPushButton, QWidget)
+
+from app.config import load_settings, save_settings
 from app.core.auth_manager import get_auth_manager
 from app.i18n import tr
 from app.ui.dialogs.base import FramelessDialog
 from app.ui.toast import show_toast
 from app.ui.workers import run_in_thread
+from app.version import POLICY_VERSION, PRIVACY_URL, TERMS_URL
 
 
 class AccountDialog(FramelessDialog):
@@ -106,6 +111,29 @@ class AccountDialog(FramelessDialog):
         self.status.setVisible(False)
         layout.addWidget(self.status)
 
+        # Terms/Privacy consent, directly above the action button (the conventional
+        # spot). It is ONE persistent row whose contents change per mode — rather than
+        # two widgets that show/hide — so toggling sign-in ↔ create account never makes
+        # it vanish (a word-wrapped label hidden then re-shown under this frameless
+        # dialog's SetFixedSize doesn't repaint reliably on Wayland). Always shown on
+        # the credential screens; hidden only on the verify/reset code steps. See
+        # _apply_mode for the per-mode contents:
+        #   • Create account: a REQUIRED checkbox + "I agree…".
+        #   • Sign-in (incl. Google): no checkbox, a passive "By continuing…" notice.
+        consent_row = QHBoxLayout()
+        self.consent = QCheckBox()
+        self.consent.setCursor(Qt.PointingHandCursor)
+        consent_row.addWidget(self.consent, 0, Qt.AlignTop)
+        self.consent_label = QLabel()
+        from app.ui.legal_links import open_legal
+        self.consent_label.linkActivated.connect(open_legal)
+        self.consent_label.setWordWrap(True)
+        self.consent_label.setObjectName("dimLabel")
+        consent_row.addWidget(self.consent_label, 1)
+        self.consent_widget = QWidget()
+        self.consent_widget.setLayout(consent_row)
+        layout.addWidget(self.consent_widget)
+
         self.primary = QPushButton(objectName="primaryButton")
         self.primary.setCursor(Qt.PointingHandCursor)
         self.primary.setDefault(True)
@@ -169,6 +197,20 @@ class AccountDialog(FramelessDialog):
         self.google_btn.setVisible(not code_step)
         self.forgot_btn.setVisible(sign_in and self._PASSWORD_RESET_ENABLED)
         self.resend_btn.setVisible(code_step)
+        # One persistent consent row, always shown on the credential screens (hidden
+        # only on the code steps). Its contents change per mode: a required checkbox +
+        # "I agree…" when creating an account; no checkbox + a passive "By continuing…"
+        # notice on the sign-in screen (which also covers Google).
+        self.consent_widget.setVisible(not code_step)
+        if not code_step:
+            self.consent.setVisible(sign_up)
+            text = (
+                'I agree to the <a href="{terms}">Terms of Service</a> and '
+                '<a href="{privacy}">Privacy Policy</a>.' if sign_up else
+                'By continuing, you agree to the <a href="{terms}">Terms of Service</a> '
+                'and <a href="{privacy}">Privacy Policy</a>.')
+            self.consent_label.setText(
+                tr(text).format(terms=TERMS_URL, privacy=PRIVACY_URL))
 
         if verify:
             self.setWindowTitle(tr("Confirm your email"))
@@ -225,6 +267,25 @@ class AccountDialog(FramelessDialog):
         self.status.clear()
         self.status.setVisible(False)
 
+    # ---- consent -------------------------------------------------------
+    def _consent_ok(self):
+        """True if the account-creation checkbox is ticked (we also record it for the
+        audit trail). Only called for account creation; sign-in/Google aren't blocked."""
+        if not self.consent.isChecked():
+            self._set_status(
+                tr("Please accept the Terms of Service and Privacy Policy to continue."))
+            return False
+        self._record_consent()
+        return True
+
+    def _record_consent(self):
+        """Record the latest Terms/Privacy acceptance (version + timestamp) for the
+        audit trail. The consent UI is always shown regardless; this is just a log."""
+        settings = load_settings()
+        settings["policy_accepted_version"] = POLICY_VERSION
+        settings["policy_accepted_at"] = datetime.now(timezone.utc).isoformat()
+        save_settings(settings)
+
     # ---- actions -------------------------------------------------------
     def _submit(self):
         self._clear_status()
@@ -239,6 +300,9 @@ class AccountDialog(FramelessDialog):
             self._set_status(tr("Enter your email and password."))
             return
         if self._mode == "sign_up":
+            # Account creation requires explicit acceptance via the checkbox.
+            if not self._consent_ok():
+                return
             name = self.name.text().strip()
             if not name:
                 self._set_status(tr("Enter your name."))
@@ -286,6 +350,11 @@ class AccountDialog(FramelessDialog):
 
     def _google(self):
         self._clear_status()
+        # Google can create an account on first sign-in. In sign-up mode the explicit
+        # checkbox applies; on the sign-in screen the passive "By continuing…" notice
+        # is the acceptance, so we don't block — consent is recorded on success.
+        if self._mode == "sign_up" and not self._consent_ok():
+            return
         self._set_status(tr("Opening your browser to sign in with Google…"), "info")
         self._set_busy(True)
         run_in_thread(self.auth.sign_in_with_google,
@@ -309,6 +378,9 @@ class AccountDialog(FramelessDialog):
             self._set_status(msg or tr("Sign-in failed."))
             return
         if self.auth.is_logged_in():
+            # Record acceptance for the paths without the explicit checkbox (email
+            # sign-in, Google) once a session is actually established. Idempotent.
+            self._record_consent()
             show_toast(self._owner or self, tr("Account"),
                        tr("Signed in as {email}").format(email=self.auth.current_user() or ""),
                        "success")

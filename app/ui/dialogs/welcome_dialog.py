@@ -32,7 +32,7 @@ from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from app.i18n import tr
 from app.ui.dialogs.base import FramelessDialog, quiet_frame, quiet_row
-from app.version import APP_NAME
+from app.version import APP_NAME, PRIVACY_URL, TERMS_URL
 
 # Resting display size of the app icon (px) and the box it lives in. The box has
 # generous vertical headroom so the cover's drop and the idle float never clip.
@@ -233,9 +233,15 @@ class WelcomeDialog(FramelessDialog):
         layout.addWidget(frame)
 
         note = QLabel(
-            tr("Your data is yours — sign in only to sync it."))
+            tr("Your data is yours — sign in only to sync it.") + "<br>"
+            + tr('<a href="{privacy}">Privacy Policy</a> · '
+                 '<a href="{terms}">Terms</a>').format(
+                     privacy=PRIVACY_URL, terms=TERMS_URL))
         note.setObjectName("dimLabel")
         note.setWordWrap(True)
+        note.setAlignment(Qt.AlignCenter)
+        from app.ui.legal_links import open_legal
+        note.linkActivated.connect(open_legal)
         layout.addWidget(note)
 
         primary = QPushButton(tr("Sign in / Create account"), objectName="primaryButton")

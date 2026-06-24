@@ -1413,7 +1413,7 @@ TRANSLATIONS: dict[str, str] = {
     "Add a text to read — write or paste your own, fetch one from the "
     "Internet, or import a .txt file.":
         "Додайте текст для читання — напишіть власний, отримайте його із "
-        "інтернету або імпортуйте із файлу .txt.",
+        "інтернету або імпортуйте із файлу txt.",
     "Add a text": "Додати текст",
     "Fetch from the Internet": "Отримати з Інтернету",
     "Import .txt": "Імпортувати .txt",
@@ -1488,6 +1488,20 @@ TRANSLATIONS: dict[str, str] = {
     "This account already has data on this device. Your profile's words and texts that aren't already there will be added to it — nothing is overwritten. “{name}” is then archived to the backups folder and removed.": "Цей обліковий запис уже має дані на цьому пристрої. Слова й тексти вашого профілю, яких там ще немає, буде додано до нього — нічого не перезаписується. Потім «{name}» буде заархівовано до теки backups та видалено.",
     "This profile has {items}, saved only on this device. Enable cloud sync to back them up and study on all your devices.": "Цей профіль містить {items}, збережені лише на цьому пристрої. Увімкніть хмарну синхронізацію, щоб зробити резервну копію та навчатися на всіх ваших пристроях.",
     "Choose the items to add. They're copied into your account and uploaded to the cloud. “{name}” is then archived to the backups folder and removed.": "Виберіть записи, які потрібно додати. Вони копіюються до вашого облікового запису й вивантажуються в хмару. Потім «{name}» буде заархівовано до теки backups та видалено.",
+
+    # ── Legal / consent ─────────────────────────────────────────────────────
+    "I agree to the <a href=\"{terms}\">Terms of Service</a> and <a href=\"{privacy}\">Privacy Policy</a>.":
+        "Я погоджуюся з <a href=\"{terms}\">Умовами надання послуг</a> та <a href=\"{privacy}\">Політикою конфіденційності</a>.",
+    "Please accept the Terms of Service and Privacy Policy to continue.":
+        "Щоб продовжити, прийміть Умови надання послуг та Політику конфіденційності.",
+    "<a href=\"{privacy}\">Privacy Policy</a> · <a href=\"{terms}\">Terms</a>":
+        "<a href=\"{privacy}\">Політика конфіденційності</a> · <a href=\"{terms}\">Умови</a>",
+    "By continuing, you agree to the <a href=\"{terms}\">Terms of Service</a> and <a href=\"{privacy}\">Privacy Policy</a>.":
+        "Продовжуючи, ви погоджуєтеся з <a href=\"{terms}\">Умовами надання послуг</a> та <a href=\"{privacy}\">Політикою конфіденційності</a>.",
+    "Privacy Policy": "Політика конфіденційності",
+    "Terms": "Умови",
+    "Website": "Вебсайт",
+    "Contact": "Контакти",
 }
 
 # Date names, read by app.i18n. Months are in the genitive case because they
