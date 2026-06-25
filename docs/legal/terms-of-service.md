@@ -1,13 +1,14 @@
 ---
-title: Terms of Service
+
+## title: Terms of Service
+
 permalink: /legal/terms-of-service/
 lang: en
 alt: /legal/uk/terms-of-service/
----
 
 # Terms of Service — Lingueez
 
-**Last updated:** 2026-06-23 · **Version:** 1.0
+**Last updated:** 2026-06-25 · **Version:** 1.0
 
 > These Terms govern your use of the **Lingueez** desktop application and the optional hosted
 > sync service. By creating an account or using the sync service you agree to these Terms.
@@ -34,7 +35,7 @@ overlap, the AGPL prevails for the software.
 ## 3. Your account
 
 - You must be at least **13 years old** to create an account (and old enough to do so under
-  the law of your country/state).
+the law of your country/state).
 - You are responsible for keeping your credentials secure and for activity under your account.
 - Provide accurate information (a valid email) so we can deliver account-related messages.
 
@@ -45,8 +46,8 @@ You agree not to:
 - use the service unlawfully, or to store or transmit unlawful content;
 - attempt to access other users' data, or to break the per-user isolation of the service;
 - overload, disrupt, attack, or reverse-engineer the hosted infrastructure (note: this does
-  **not** restrict your AGPL rights regarding the **software**, which you may freely study and
-  modify);
+**not** restrict your AGPL rights regarding the **software**, which you may freely study and
+modify);
 - use the service to infringe others' rights.
 
 We may suspend or terminate accounts that violate these Terms.
@@ -106,9 +107,7 @@ your own country or state remain unaffected.
 
 ## 12. Contact
 
-**Lingueez** · **privacy@lingueez.app**
+**Lingueez** · **[privacy@lingueez.app](mailto:privacy@lingueez.app)**
 
 ---
 
-*This document is a tailored template, not legal advice. Have it reviewed by a qualified
-lawyer before public release.*

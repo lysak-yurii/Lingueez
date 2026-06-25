@@ -32,7 +32,7 @@ translations and synced audio; and keep everything in sync across devices.
 - **Statistics** — a dashboard with status distribution, streaks, definition
   coverage, and progress over time ([screenshot](screenshots/statistics.png)).
 - **Import & export** — Excel import with duplicate detection; export to PDF, Excel,
-  CSV, and **Anki**-friendly TXT.
+  CSV, **Anki**-friendly TXT and MP3.
 - **Sync & backups** — two-way cloud sync, a bin to restore deleted items, and
   automatic daily backups with retention.
 
