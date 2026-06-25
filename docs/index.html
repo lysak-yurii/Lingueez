@@ -4,12 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lingueez — build a vocabulary that sticks</title>
-<meta name="description" content="A free, open-source desktop app for building, studying and remembering vocabulary across languages. Add words that translate automatically and watch each climb from New to Mastered.">
+<meta name="description" content="A free, open-source desktop app for building, studying and remembering vocabulary across languages. Add words that translate automatically and watch each one climb from New to Mastered.">
 <link rel="icon" href="/assets/icon.png">
+<meta name="theme-color" content="#0d1117">
 <meta property="og:title" content="Lingueez — build a vocabulary that sticks">
-<meta property="og:description" content="Add words that translate automatically and watch each climb from New to Mastered. Free & open source.">
-<meta property="og:image" content="/assets/dashboard.png">
+<meta property="og:description" content="Add words that translate automatically and watch each one climb from New to Mastered. Free & open source.">
+<meta property="og:image" content="https://lingueez.app/assets/dashboard.png">
+<meta property="og:url" content="https://lingueez.app/">
 <meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Lingueez — build a vocabulary that sticks">
+<meta name="twitter:description" content="Add words that translate automatically and watch each one climb from New to Mastered. Free & open source.">
+<meta name="twitter:image" content="https://lingueez.app/assets/dashboard.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -79,6 +85,9 @@ document.documentElement.setAttribute('data-lang',s);})();
   .hero h1{font-size:clamp(2.3rem,4.6vw,3.5rem); margin:.5rem 0 .2rem; font-weight:700;}
   .hero h1 .new{color:var(--grey);}
   .hero h1 .mastered{color:var(--green);}
+  .hero h1 .accent{color:var(--blue);}
+  /* Ukrainian words are longer — slightly smaller hero headline so it fits. */
+  html[data-lang="uk"] .hero h1{font-size:clamp(1.95rem,3.8vw,2.8rem);}
   .lede{font-size:1.12rem; color:var(--dim); max-width:34ch; margin:1rem 0 1.7rem;}
   .cta-row{display:flex; flex-wrap:wrap; gap:12px;}
   .trust{margin-top:1.4rem; color:var(--dim); font-size:.86rem; display:flex; gap:.5em; flex-wrap:wrap;}
@@ -211,10 +220,10 @@ document.documentElement.setAttribute('data-lang',s);})();
   <div class="wrap">
     <div class="copy">
       <p class="eyebrow"><span lang="en">Free · Open-source vocabulary trainer</span><span lang="uk">Безкоштовний тренажер лексики з відкритим кодом</span></p>
-      <h1 lang="en">Every word, from <span class="new">New</span> to <span class="mastered">Mastered</span>.</h1>
-      <h1 lang="uk">Кожне слово — від <span class="new">Нового</span> до <span class="mastered">Засвоєного</span>.</h1>
-      <p class="lede" lang="en">Add words and they translate automatically. Listen on repeat and watch each one climb the levels — then read whole texts with side-by-side translation and synced audio, in sync across your devices.</p>
-      <p class="lede" lang="uk">Додавайте слова — і вони перекладаються автоматично. Слухайте їх на повторі та спостерігайте, як кожне піднімається рівнями — а потім читайте цілі тексти з паралельним перекладом і синхронним озвученням, синхронізовано між пристроями.</p>
+      <h1 lang="en">Build a vocabulary that <span class="accent">actually stays with you</span></h1>
+      <h1 lang="uk">Створюйте словниковий запас, який <span class="accent">справді залишається з вами</span></h1>
+      <p class="lede" lang="en">Save words as you discover them, get instant translations, practice with audio, and track your progress from first encounter to mastery. Read real-world content with synchronized translations and audio—all in one place.</p>
+      <p class="lede" lang="uk">Зберігайте нові слова, отримуйте миттєві переклади, закріплюйте лексику за допомогою аудіо та відстежуйте свій прогрес від першого знайомства до повного засвоєння. Читайте реальні тексти із синхронним перекладом та озвученням — усе в одному застосунку.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/lysak-yurii/Lingueez/releases">
           <span lang="en">Download</span><span lang="uk">Завантажити</span></a>
@@ -224,12 +233,11 @@ document.documentElement.setAttribute('data-lang',s);})();
       <p class="trust">
         <b><span lang="en">Free</span><span lang="uk">Безкоштовно</span></b> ·
         <b><span lang="en">Open source</span><span lang="uk">Відкритий код</span></b> ·
-        <b><span lang="en">Local-first</span><span lang="uk">Спершу локально</span></b> ·
-        <b><span lang="en">No tracking</span><span lang="uk">Без стеження</span></b>
+        <b><span lang="en">Local-first</span><span lang="uk">Локальне зберігання</span></b>
       </p>
     </div>
     <div class="shot">
-      <img src="/assets/dashboard.png" alt="The Lingueez vocabulary list, with words colour-coded by learning status.">
+      <img src="/assets/dashboard.png" alt="The Lingueez vocabulary list, with words color-coded by learning status.">
     </div>
   </div>
 </header>
@@ -246,7 +254,7 @@ document.documentElement.setAttribute('data-lang',s);})();
       <span class="arrow">→</span>
       <span class="pill mas"><span class="dot"></span><span lang="en">Mastered</span><span lang="uk">Засвоєно</span></span>
     </div>
-    <p class="cap"><span lang="en">Listen on repeat and every word climbs the levels — at thresholds you set.</span><span lang="uk">Слухайте на повторі — і кожне слово піднімається рівнями за порогами, які ви задаєте.</span></p>
+    <p class="cap"><span lang="en">Every word follows a clear learning path. Review, listen, and reinforce vocabulary at your own pace while Lingueez tracks your progress automatically.</span><span lang="uk">Кожне слово проходить зрозумілий шлях навчання. Повторюйте, слухайте та закріплюйте лексику у власному темпі, а Lingueez автоматично відстежуватиме ваш прогрес.</span></p>
   </div>
 </section>
 
@@ -254,19 +262,19 @@ document.documentElement.setAttribute('data-lang',s);})();
 <section id="features">
   <div class="wrap">
     <div class="section-head reveal">
-      <h2><span lang="en">Everything you need to learn words</span><span lang="uk">Усе, щоб вивчати слова</span></h2>
-      <p><span lang="en">One focused desktop app — no subscriptions, no clutter.</span><span lang="uk">Один зосереджений застосунок — без підписок і зайвого.</span></p>
+      <h2><span lang="en">Everything you need to build vocabulary efficiently</span><span lang="uk">Усе необхідне для ефективного вивчення лексики</span></h2>
+      <p><span lang="en">A focused learning environment designed to help you acquire, review, and retain vocabulary across multiple languages.</span><span lang="uk">Зосереджене середовище для навчання, яке допомагає засвоювати, повторювати та запам’ятовувати лексику різними мовами.</span></p>
     </div>
     <div class="grid reveal">
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></div><h3><span lang="en">Words, tags &amp; definitions</span><span lang="uk">Слова, теги й визначення</span></h3><p><span lang="en">Organize entries with statuses, favorites, tags and two definition fields.</span><span lang="uk">Упорядковуйте записи зі статусами, обраним, тегами та двома полями визначень.</span></p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><h3><span lang="en">New → Mastered</span><span lang="uk">Нове → Засвоєно</span></h3><p><span lang="en">Words advance as you listen, with listen thresholds you control.</span><span lang="uk">Слова просуваються, поки ви слухаєте, за порогами, які ви контролюєте.</span></p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg></div><h3><span lang="en">Instant translation</span><span lang="uk">Миттєвий переклад</span></h3><p><span lang="en">Google Translate built in, with optional DeepL for higher quality.</span><span lang="uk">Вбудований Google Перекладач, за бажанням — DeepL для вищої якості.</span></p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7z"/><path d="M19 15l.85 3.15L23 19l-3.15.85L19 23l-.85-3.15L15 19l3.15-.85z"/></svg></div><h3><span lang="en">AI-assisted definitions</span><span lang="uk">Визначення за допомогою ШІ</span></h3><p><span lang="en">OpenAI or Gemini for definitions and generated study texts.</span><span lang="uk">OpenAI або Gemini для визначень і згенерованих навчальних текстів.</span></p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></div><h3><span lang="en">Read-aloud &amp; MP3</span><span lang="uk">Озвучення та MP3</span></h3><p><span lang="en">Listen with adjustable pauses and repeats; export audio to MP3.</span><span lang="uk">Слухайте з налаштовними паузами й повторами; експортуйте аудіо у MP3.</span></p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div><h3><span lang="en">Texts reader</span><span lang="uk">Читач текстів</span></h3><p><span lang="en">Import from files, the web, Wikipedia or RSS; read with synced audio.</span><span lang="uk">Імпортуйте з файлів, вебу, Вікіпедії чи RSS; читайте із синхронним аудіо.</span></p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg></div><h3><span lang="en">Sync &amp; backups</span><span lang="uk">Синхронізація та копії</span></h3><p><span lang="en">Two-way cloud sync, a restore bin, and automatic daily backups.</span><span lang="uk">Двостороння хмарна синхронізація, кошик відновлення та щоденні копії.</span></p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><h3><span lang="en">Import &amp; export</span><span lang="uk">Імпорт та експорт</span></h3><p><span lang="en">Excel import with duplicate detection; export to PDF, Excel, CSV &amp; Anki.</span><span lang="uk">Імпорт з Excel із виявленням дублікатів; експорт у PDF, Excel, CSV та Anki.</span></p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3z"/></svg></div><h3><span lang="en">Add from anywhere</span><span lang="uk">Додавайте звідусіль</span></h3><p><span lang="en">A global hotkey adds and translates a word straight from the clipboard.</span><span lang="uk">Глобальна гаряча клавіша додає й перекладає слово прямо з буфера обміну.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg></div><h3><span lang="en">Words, tags &amp; definitions</span><span lang="uk">Слова, теги й визначення</span></h3><p><span lang="en">Organize vocabulary with tags, favorites, definitions, and learning statuses to keep everything structured and searchable.</span><span lang="uk">Організовуйте лексику за допомогою тегів, обраного, визначень і статусів навчання, щоб усе залишалося впорядкованим і зручним для пошуку.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><h3><span lang="en">New → Mastered</span><span lang="uk">Нове → Засвоєно</span></h3><p><span lang="en">Track every word from first exposure to mastery with customizable progression rules.</span><span lang="uk">Відстежуйте шлях кожного слова від першого знайомства до повного засвоєння за допомогою гнучких правил прогресу.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg></div><h3><span lang="en">Instant translation</span><span lang="uk">Миттєвий переклад</span></h3><p><span lang="en">Translate words instantly as you add them, with optional DeepL integration for enhanced accuracy.</span><span lang="uk">Перекладайте слова одразу під час додавання, з можливістю використання DeepL для ще вищої якості перекладу.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7z"/><path d="M19 15l.85 3.15L23 19l-3.15.85L19 23l-.85-3.15L15 19l3.15-.85z"/></svg></div><h3><span lang="en">AI-assisted definitions</span><span lang="uk">Визначення за допомогою ШІ</span></h3><p><span lang="en">Generate definitions, examples, and study materials with OpenAI or Gemini integration.</span><span lang="uk">Створюйте визначення, приклади та навчальні матеріали за допомогою OpenAI або Gemini.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg></div><h3><span lang="en">Read-aloud &amp; MP3</span><span lang="uk">Озвучення та MP3</span></h3><p><span lang="en">Reinforce vocabulary through audio with customizable repetition, pacing, and MP3 export.</span><span lang="uk">Закріплюйте лексику через аудіо з налаштовуваними повторами, темпом відтворення та експортом у MP3.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div><h3><span lang="en">Texts reader</span><span lang="uk">Читач текстів</span></h3><p><span lang="en">Import articles, web content, Wikipedia pages, and RSS feeds for immersive reading with synchronized translations and audio.</span><span lang="uk">Імпортуйте статті, вебсторінки, матеріали з Вікіпедії та RSS-стрічок для занурення в читання із синхронним перекладом та озвученням.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg></div><h3><span lang="en">Sync &amp; backups</span><span lang="uk">Синхронізація та копії</span></h3><p><span lang="en">Protect your learning data with automatic backups, recovery tools, and optional cloud synchronization.</span><span lang="uk">Захищайте свої дані за допомогою автоматичних резервних копій, інструментів відновлення та необов’язкової хмарної синхронізації.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></div><h3><span lang="en">Import &amp; export</span><span lang="uk">Імпорт та експорт</span></h3><p><span lang="en">Easily move your vocabulary between tools with Excel imports and exports to PDF, CSV, Excel, MP3 and Anki-compatible formats.</span><span lang="uk">Легко переносіть свою лексику між інструментами завдяки імпорту з Excel та експорту у PDF, CSV, Excel, MP3 і формати, сумісні з Anki.</span></p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3z"/></svg></div><h3><span lang="en">Add from anywhere</span><span lang="uk">Додавайте звідусіль</span></h3><p><span lang="en">Capture and translate words instantly from anywhere using a configurable global keyboard shortcut.</span><span lang="uk">Додавайте та перекладайте слова миттєво з будь-якої програми за допомогою налаштовуваної глобальної гарячої клавіші.</span></p></div>
     </div>
   </div>
 </section>
@@ -276,15 +284,15 @@ document.documentElement.setAttribute('data-lang',s);})();
   <div class="wrap">
     <div class="show reveal">
       <div class="copy">
-        <h2><span lang="en">Read real texts, side by side</span><span lang="uk">Читайте справжні тексти поруч</span></h2>
-        <p><span lang="en">Bring in articles from the web, Wikipedia or RSS and read them with a live translation — and audio that highlights each word as it's spoken.</span><span lang="uk">Додавайте статті з вебу, Вікіпедії чи RSS і читайте їх із живим перекладом — та аудіо, що підсвічує кожне слово під час озвучення.</span></p>
+        <h2><span lang="en">Learn from real content</span><span lang="uk">Навчайтеся на реальному контенті</span></h2>
+        <p><span lang="en">Read articles, web pages, Wikipedia entries, and other authentic content with side-by-side translations and synchronized audio. Focus on understanding instead of switching between multiple tools.</span><span lang="uk">Читайте статті, вебсторінки, матеріали з Вікіпедії та інший автентичний контент із паралельним перекладом і синхронним аудіо. Зосереджуйтеся на розумінні змісту, а не на постійному перемиканні між різними інструментами.</span></p>
       </div>
       <img src="/assets/texts.png" alt="The Lingueez reader showing a text with a side-by-side translation.">
     </div>
     <div class="show flip reveal">
       <div class="copy">
-        <h2><span lang="en">Watch your progress</span><span lang="uk">Стежте за прогресом</span></h2>
-        <p><span lang="en">A dashboard of status distribution, streaks, definition coverage and your progress over time.</span><span lang="uk">Панель із розподілом статусів, серіями, покриттям визначень і вашим поступом у часі.</span></p>
+        <h2><span lang="en">See your progress over time</span><span lang="uk">Бачте свій прогрес у часі</span></h2>
+        <p><span lang="en">Monitor vocabulary growth, learning streaks, definition coverage, and mastery levels through a clear and informative dashboard.</span><span lang="uk">Відстежуйте зростання словникового запасу, навчальні серії, покриття визначень і рівень засвоєння через зрозумілу та інформативну панель статистики.</span></p>
       </div>
       <img src="/assets/statistics.png" alt="The Lingueez statistics dashboard.">
     </div>
@@ -295,8 +303,8 @@ document.documentElement.setAttribute('data-lang',s);})();
 <section>
   <div class="wrap reveal">
     <div class="privacy">
-      <h2><span lang="en">Your data is yours</span><span lang="uk">Ваші дані — ваші</span></h2>
-      <p><span lang="en">Lingueez is local-first: use it fully offline, no account required. Cloud sync is optional, there's no analytics and no tracking, and it's free and open source under the AGPL.</span><span lang="uk">Lingueez працює спершу локально: користуйтеся повністю офлайн, без облікового запису. Хмарна синхронізація — за бажанням, жодної аналітики та стеження; безкоштовно та з відкритим кодом за ліцензією AGPL.</span></p>
+      <h2><span lang="en">Your vocabulary belongs to you</span><span lang="uk">Ваш словниковий запас належить лише вам</span></h2>
+      <p><span lang="en">Lingueez is built with a local-first approach. Use it completely offline without creating an account. Cloud synchronization is optional, and your learning data is never tracked or analyzed. Free and open source under the AGPL license.</span><span lang="uk">Користуйтеся застосунком повністю офлайн і без створення облікового запису. Хмарна синхронізація залишається необов’язковою, а ваші навчальні дані ніколи не відстежуються та не аналізуються. Безкоштовний застосунок із відкритим кодом під ліцензією AGPL.</span></p>
       <a class="btn btn-ghost" href="/legal/privacy-policy/"><span lang="en">Read the Privacy Policy</span><span lang="uk">Читати Політику конфіденційності</span></a>
     </div>
   </div>
@@ -305,7 +313,7 @@ document.documentElement.setAttribute('data-lang',s);})();
 <!-- CTA BAND -->
 <section class="ctaband">
   <div class="wrap reveal">
-    <h2><span lang="en">Start building your vocabulary</span><span lang="uk">Почніть будувати свій словник</span></h2>
+    <h2><span lang="en">Start building a stronger vocabulary today</span><span lang="uk">Почніть розширювати свій словниковий запас вже сьогодні</span></h2>
     <div class="cta-row" style="justify-content:center;">
       <a class="btn btn-primary" href="https://github.com/lysak-yurii/Lingueez/releases"><span lang="en">Download</span><span lang="uk">Завантажити</span></a>
       <a class="btn btn-ghost" href="https://github.com/lysak-yurii/Lingueez"><span lang="en">View on GitHub</span><span lang="uk">Переглянути на GitHub</span></a>
@@ -319,7 +327,7 @@ document.documentElement.setAttribute('data-lang',s);})();
     <div class="foot-grid">
       <div>
         <a class="brand" href="/" style="font-size:1.05rem;"><img src="/assets/icon.png" alt="" style="width:24px;height:24px;"> Lingueez</a>
-        <p style="margin:.7rem 0 0; max-width:30ch;"><span lang="en">Build a vocabulary that sticks — across every language you learn.</span><span lang="uk">Створіть словник, що залишається — кожною мовою, яку ви вивчаєте.</span></p>
+        <p style="margin:.7rem 0 0; max-width:30ch;"><span lang="en">Build vocabulary with confidence—across every language you learn.</span><span lang="uk">Вивчайте лексику впевнено — незалежно від того, яку мову ви опановуєте.</span></p>
       </div>
       <div>
         <h4><span lang="en">Product</span><span lang="uk">Продукт</span></h4>
@@ -328,7 +336,7 @@ document.documentElement.setAttribute('data-lang',s);})();
         <a href="https://github.com/lysak-yurii/Lingueez"><span lang="en">Source code</span><span lang="uk">Вихідний код</span></a>
       </div>
       <div>
-        <h4><span lang="en">Legal</span><span lang="uk">Правове</span></h4>
+        <h4><span lang="en">Legal</span><span lang="uk">Правова інформація</span></h4>
         <a href="/legal/privacy-policy/"><span lang="en">Privacy Policy</span><span lang="uk">Політика конфіденційності</span></a>
         <a href="/legal/terms-of-service/"><span lang="en">Terms</span><span lang="uk">Умови</span></a>
       </div>

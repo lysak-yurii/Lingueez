@@ -1,9 +1,9 @@
 ---
-
-## title: Privacy Policy
+title: Privacy Policy
 permalink: /legal/privacy-policy/
 lang: en
 alt: /legal/uk/privacy-policy/
+---
 
 # Privacy Policy — Lingueez
 

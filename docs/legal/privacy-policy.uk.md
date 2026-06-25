@@ -1,10 +1,9 @@
 ---
-
-## title: Політика конфіденційності
-
+title: Політика конфіденційності
 permalink: /legal/uk/privacy-policy/
 lang: uk
 alt: /legal/privacy-policy/
+---
 
 # Політика конфіденційності — Lingueez
 
