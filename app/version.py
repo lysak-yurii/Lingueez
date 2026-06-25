@@ -20,7 +20,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 APP_VERSION = "2.0.0"
-BUILD_NUMBER = "2026062504"
+BUILD_NUMBER = "2026062505"
 APP_NAME = "Lingueez"
 APP_ID = "Lingueez"  # WM_CLASS / desktop-file basename
 
@@ -35,6 +35,13 @@ TERMS_URL_FALLBACK = "https://github.com/lysak-yurii/Lingueez/blob/main/docs/leg
 # the domain is actually reachable.
 WEBSITE_URL = "https://lingueez.app"
 CONTACT_EMAIL = "support@lingueez.app"
+
+# Optional financial support. These are hosted pages opened in the user's browser —
+# the app never embeds a payment form.
+# TODO(support): confirm the GitHub Sponsors profile is live at this handle.
+SPONSORS_URL = "https://github.com/sponsors/lysak-yurii"  # TODO(support)
+# Live Stripe Payment Link (pay-what-you-want, one-time).
+DONATE_URL = "https://buy.stripe.com/14A8wRd41a8f1aI6rw43S02"
 
 # Bumped whenever the Terms/Privacy change materially enough to require users to
 # re-accept. The stored "policy_accepted_version" is compared against this on launch

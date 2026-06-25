@@ -6,6 +6,8 @@
 
 # Lingueez
 
+**[lingueez.app](https://lingueez.app)**
+
 A desktop app for building, studying, and remembering vocabulary across languages.
 
 Add words and they translate automatically; listen to them on repeat and watch each
@@ -42,6 +44,15 @@ API keys and preferences are all managed inside the app under **Settings**.
 
 A global hotkey (**Ctrl+Shift+V** by default, configurable in **Settings**) adds a
 word straight from the clipboard and translates it.
+
+## Support
+
+Lingueez is free and open-source, with no paywalls. If you enjoy Lingueez and
+find it useful, a one-off contribution helps cover the servers behind optional
+cloud sync and supports continued development:
+
+- **[Support Lingueez's development](https://buy.stripe.com/14A8wRd41a8f1aI6rw43S02)** — one-time, no subscription (card / Apple Pay / Google Pay).
+- **[GitHub Sponsors](https://github.com/sponsors/lysak-yurii)** — for developers; recurring or one-off.
 
 ## Contributing
 

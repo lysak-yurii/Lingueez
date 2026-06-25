@@ -617,6 +617,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "_pending_update", None):
             menu.addAction(self._build_update_menu_item(menu, self._pending_update))
         menu.addAction(self._icon("help-circle"), tr("Show Tour"), self.start_tour)
+        menu.addAction(self._icon("heart"), tr("Support Lingueez"), self.show_support)
         menu.addAction(tr("About"), self.show_about)
         menu.addAction(self._icon("x"), tr("Quit"), self.quit_app)
         return menu
@@ -4269,18 +4270,23 @@ class MainWindow(QMainWindow):
         def _links_html(with_website):
             parts = [_anchor(PRIVACY_URL, tr("Privacy Policy")),
                      _anchor(TERMS_URL, tr("Terms")),
-                     _anchor("mailto:" + CONTACT_EMAIL, tr("Contact"))]
+                     _anchor("mailto:" + CONTACT_EMAIL, tr("Contact")),
+                     _anchor("#support", tr("Support"))]
             if with_website:
                 parts.append(_anchor(WEBSITE_URL, tr("Website")))
             return f' <span style="color:{dim}">·</span> '.join(parts)
 
         def _open_link(href):
-            if href in (PRIVACY_URL, TERMS_URL):
+            if href == "#support":
+                dialog.accept()  # close About, then open the Support dialog
+                self.show_support()
+            elif href in (PRIVACY_URL, TERMS_URL):
                 open_legal(href)  # keep the GitHub failover
             else:
                 QDesktopServices.openUrl(QUrl(href))  # mailto / website
 
         links = QLabel(_links_html(False))
+        links.setWordWrap(True)
         links.setOpenExternalLinks(False)
         links.linkActivated.connect(_open_link)
         dialog.content_layout.addWidget(links)
@@ -4322,6 +4328,10 @@ class MainWindow(QMainWindow):
         row.addWidget(ok)
         dialog.content_layout.addLayout(row)
         dialog.exec()
+
+    def show_support(self):
+        from app.ui.dialogs.support_dialog import SupportDialog
+        SupportDialog(self).exec()
 
     def _report_an_issue(self):
         """Bundle diagnostics and open a prefilled GitHub issue.

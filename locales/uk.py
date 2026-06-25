@@ -1142,6 +1142,16 @@ TRANSLATIONS: dict[str, str] = {
     "Found a bug or have an idea?": "Знайшли помилку або маєте ідею?",
     "Report an issue": "Повідомити про проблему",
 
+    # Support dialog
+    "Support": "Підтримати",
+    "Support Lingueez": "Підтримати Lingueez",
+    "Lingueez is free and open-source.": "Lingueez — безкоштовний застосунок із відкритим кодом.",
+    "If you enjoy Lingueez and find it useful, a one-off contribution helps cover the servers behind optional cloud sync and supports continued development. There's no paywall — every feature stays free either way.":
+        "Якщо вам подобається Lingueez і приносить користь, разовий внесок допомагає покривати витрати на сервери для необов'язкової хмарної синхронізації та підтримує подальшу розробку. Жодних платних обмежень — усі функції залишаються безкоштовними в будь-якому разі.",
+    "Support Lingueez's development": "Підтримати розвиток Lingueez",
+    "The Stripe option is one-time — no subscription. Payments are handled securely by Stripe or GitHub.":
+        "Варіант зі Stripe — одноразовий, без підписки. Оплата здійснюється безпечно через Stripe або GitHub.",
+
     # Updates
     "Updates": "Оновлення",
     "Check for updates": "Перевірити оновлення",
