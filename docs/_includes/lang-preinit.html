@@ -1,0 +1,6 @@
+<script>
+/* Pick language before paint to avoid a flash. */
+(function(){var s;try{s=localStorage.getItem('lz-lang');}catch(e){}
+if(s!=='en'&&s!=='uk'){s=(navigator.language||'').toLowerCase().indexOf('uk')===0?'uk':'en';}
+document.documentElement.setAttribute('data-lang',s);})();
+</script>

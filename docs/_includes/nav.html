@@ -1,0 +1,19 @@
+{%- comment -%} Marketing nav. Param: active ("features"|"koreader") for aria-current. {%- endcomment -%}
+<nav class="nav">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/icon.png" alt=""> Lingueez</a>
+    <div class="spacer"></div>
+    <div class="nav-links nav-desktop">
+      <a href="/#features"><span lang="en">Features</span><span lang="uk">Можливості</span></a>
+      <a href="/koreader/"{% if include.active == "koreader" %} aria-current="page"{% endif %}><span lang="en">E-reader</span><span lang="uk">Е-читач</span></a>
+      <a href="/#support"><span lang="en">Support</span><span lang="uk">Підтримати</span></a>
+      <a href="https://github.com/lysak-yurii/lingueez"><span lang="en">Open source</span><span lang="uk">Відкритий код</span></a>
+    </div>
+    <div class="lang" role="group" aria-label="Language">
+      <button data-lang-btn="en" aria-pressed="true">EN</button>
+      <button data-lang-btn="uk" aria-pressed="false">UK</button>
+    </div>
+    <a class="btn btn-primary nav-desktop" href="https://github.com/lysak-yurii/lingueez/releases">
+      <span lang="en">Download</span><span lang="uk">Завантажити</span></a>
+  </div>
+</nav>

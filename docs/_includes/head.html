@@ -1,0 +1,32 @@
+{%- comment -%}
+  Shared <head>. Parameters (all optional):
+    title       — <title> and og/twitter title
+    description — meta description + og/twitter description
+    image       — absolute og/twitter image URL (default: dashboard.png)
+    url         — absolute canonical/og URL
+    robots      — robots directive (default: index, follow)
+{%- endcomment -%}
+{%- assign t = include.title | default: site.title -%}
+{%- assign d = include.description -%}
+{%- assign img = include.image | default: "https://lingueez.app/assets/dashboard.png" -%}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="{{ include.robots | default: 'index, follow' }}">
+<title>{{ t }}</title>
+{% if d %}<meta name="description" content="{{ d }}">{% endif %}
+<link rel="icon" href="/assets/icon.png">
+<meta name="theme-color" content="#0d1117">
+{% if include.url %}<link rel="canonical" href="{{ include.url }}">{% endif %}
+<meta property="og:title" content="{{ t }}">
+{% if d %}<meta property="og:description" content="{{ d }}">{% endif %}
+<meta property="og:image" content="{{ img }}">
+{% if include.url %}<meta property="og:url" content="{{ include.url }}">{% endif %}
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ t }}">
+{% if d %}<meta name="twitter:description" content="{{ d }}">{% endif %}
+<meta name="twitter:image" content="{{ img }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/site.css">

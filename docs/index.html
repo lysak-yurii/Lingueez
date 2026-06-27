@@ -1,220 +1,36 @@
-<!DOCTYPE html>
-<html lang="en" data-lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lingueez — build a vocabulary that sticks</title>
-<meta name="description" content="A free, open-source desktop app for building, studying and remembering vocabulary across languages. Add words that translate automatically and watch each one climb from New to Mastered.">
-<link rel="icon" href="/assets/icon.png">
-<meta name="theme-color" content="#0d1117">
-<meta property="og:title" content="Lingueez — build a vocabulary that sticks">
-<meta property="og:description" content="Add words that translate automatically and watch each one climb from New to Mastered. Free & open source.">
-<meta property="og:image" content="https://lingueez.app/assets/dashboard.png">
-<meta property="og:url" content="https://lingueez.app/">
-<meta property="og:type" content="website">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Lingueez — build a vocabulary that sticks">
-<meta name="twitter:description" content="Add words that translate automatically and watch each one climb from New to Mastered. Free & open source.">
-<meta name="twitter:image" content="https://lingueez.app/assets/dashboard.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-<script>
-/* Pick language before paint to avoid a flash. */
-(function(){var s;try{s=localStorage.getItem('lz-lang');}catch(e){}
-if(s!=='en'&&s!=='uk'){s=(navigator.language||'').toLowerCase().indexOf('uk')===0?'uk':'en';}
-document.documentElement.setAttribute('data-lang',s);})();
-</script>
-<style>
-  :root{
-    --bg:#0d1117; --bg2:#0b0f14; --surface:#161d26; --surface2:#1b2430;
-    --border:#232c38; --text:#e6edf3; --dim:#94a3b3;
-    --blue:#4f8cff; --amber:#f0b429; --green:#3fb950; --grey:#8b98a5;
-    --maxw:1120px; --radius:14px;
-  }
-  *{box-sizing:border-box;}
-  html{scroll-behavior:smooth;}
-  body{
-    margin:0; background:var(--bg); color:var(--text);
-    font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    line-height:1.6; -webkit-font-smoothing:antialiased;
-    background-image:
-      radial-gradient(60rem 40rem at 75% -10%, rgba(79,140,255,.10), transparent 60%),
-      radial-gradient(50rem 30rem at -5% 8%, rgba(240,180,41,.07), transparent 55%);
-    background-repeat:no-repeat;
-  }
-  html[data-lang="en"] [lang="uk"], html[data-lang="uk"] [lang="en"]{display:none !important;}
-  a{color:var(--blue); text-decoration:none;}
-  a:hover{text-decoration:underline;}
-  img{max-width:100%; display:block;}
-  h1,h2,h3{font-family:"Space Grotesk",Inter,sans-serif; line-height:1.1; letter-spacing:-.01em;}
-  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 24px;}
-  .eyebrow{font-size:.8rem; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); font-weight:600;}
+---
+layout: marketing
+title: Lingueez — build a vocabulary that sticks
+description: A free, open-source desktop app for building, studying and remembering vocabulary across languages. Add words that translate automatically and watch each one climb from New to Mastered.
+canonical: https://lingueez.app/
+nav_active: home
+head_extra: |
+  <style>
+    .hero h1 .new{color:var(--grey);}
+    .hero h1 .mastered{color:var(--green);}
+    /* Ukrainian words are longer — slightly smaller hero headline so it fits. */
+    html[data-lang="uk"] .hero h1{font-size:clamp(1.95rem,3.8vw,2.8rem);}
+    .shot img{animation:float 7s ease-in-out infinite;}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 
-  /* buttons */
-  .btn{display:inline-flex; align-items:center; gap:.5em; font-weight:600; font-size:.98rem;
-    padding:.72em 1.25em; border-radius:11px; border:1px solid transparent; cursor:pointer;
-    transition:transform .15s ease, background .15s ease, border-color .15s ease;}
-  .btn:hover{text-decoration:none; transform:translateY(-1px);}
-  .btn-primary{background:var(--blue); color:#fff; box-shadow:0 6px 20px rgba(79,140,255,.28);}
-  .btn-primary:hover{background:#5f97ff;}
-  .btn-ghost{background:transparent; color:var(--text); border-color:var(--border);}
-  .btn-ghost:hover{border-color:#384455; background:rgba(255,255,255,.03);}
+    /* progression band */
+    .prog{background:linear-gradient(180deg,var(--surface),var(--bg)); border-top:1px solid var(--border);
+      border-bottom:1px solid var(--border);}
+    .ladder{display:flex; align-items:center; justify-content:center; gap:0; flex-wrap:wrap;}
+    .ladder .pill{font-size:.92rem; padding:.4em .9em;}
+    .ladder .arrow{color:var(--dim); margin:0 .8em; flex:0 0 auto;}
+    .prog .cap{text-align:center; color:var(--dim); margin:1.1rem auto 0; max-width:48ch;}
 
-  /* nav */
-  .nav{position:sticky; top:0; z-index:50; transition:background .2s ease, border-color .2s ease, backdrop-filter .2s ease;
-    border-bottom:1px solid transparent;}
-  .nav.scrolled{background:rgba(13,17,23,.8); backdrop-filter:blur(12px); border-bottom-color:var(--border);}
-  .nav .wrap{display:flex; align-items:center; gap:22px; height:64px;}
-  .brand{display:flex; align-items:center; gap:10px; color:var(--text); font-weight:700;
-    font-family:"Space Grotesk",sans-serif; font-size:1.12rem;}
-  .brand img{width:28px; height:28px;}
-  .nav .spacer{flex:1;}
-  .nav-links{display:flex; align-items:center; gap:22px;}
-  .nav-links a{color:var(--dim); font-weight:500; font-size:.95rem;}
-  .nav-links a:hover{color:var(--text); text-decoration:none;}
-  /* language toggle */
-  .lang{display:inline-flex; border:1px solid var(--border); border-radius:9px; overflow:hidden;}
-  .lang button{background:transparent; color:var(--dim); border:0; padding:.34em .6em; font:inherit;
-    font-size:.82rem; font-weight:600; cursor:pointer;}
-  .lang button[aria-pressed="true"]{background:var(--surface2); color:var(--text);}
+    /* privacy strip */
+    .privacy{background:var(--surface); border:1px solid var(--border); border-radius:18px;
+      padding:42px; text-align:center;}
+    .privacy h2{font-size:clamp(1.5rem,2.6vw,1.9rem); margin:0 0 .5rem;}
+    .privacy p{color:var(--dim); max-width:60ch; margin:0 auto 1.1rem;}
 
-  /* hero */
-  .hero .wrap{display:grid; grid-template-columns:1.04fr 1fr; gap:54px; align-items:center;
-    padding-top:72px; padding-bottom:84px;}
-  .hero h1{font-size:clamp(2.3rem,4.6vw,3.5rem); margin:.5rem 0 .2rem; font-weight:700;}
-  .hero h1 .new{color:var(--grey);}
-  .hero h1 .mastered{color:var(--green);}
-  .hero h1 .accent{color:var(--blue);}
-  /* Ukrainian words are longer — slightly smaller hero headline so it fits. */
-  html[data-lang="uk"] .hero h1{font-size:clamp(1.95rem,3.8vw,2.8rem);}
-  .lede{font-size:1.12rem; color:var(--dim); max-width:34ch; margin:1rem 0 1.7rem;}
-  .cta-row{display:flex; flex-wrap:wrap; gap:12px;}
-  .trust{margin-top:1.4rem; color:var(--dim); font-size:.86rem; display:flex; gap:.5em; flex-wrap:wrap;}
-  .trust b{color:var(--text); font-weight:600;}
-  .shot{position:relative;}
-  .shot::before{content:""; position:absolute; inset:-12% -8% -16% -8%; z-index:-1;
-    background:radial-gradient(closest-side, rgba(79,140,255,.22), transparent 72%),
-               radial-gradient(closest-side, rgba(240,180,41,.14), transparent 70%);
-    filter:blur(8px);}
-  .shot img{width:100%; border:1px solid var(--border); border-radius:var(--radius);
-    box-shadow:0 30px 70px -28px rgba(0,0,0,.75), 0 2px 0 rgba(255,255,255,.03) inset;
-    animation:float 7s ease-in-out infinite;}
-  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
-
-  /* status pills */
-  .pill{display:inline-flex; align-items:center; gap:.45em; padding:.28em .7em; border-radius:999px;
-    font-size:.82rem; font-weight:600; border:1px solid;}
-  .pill .dot{width:.5em; height:.5em; border-radius:50%; background:currentColor;}
-  .pill.new{color:var(--grey); border-color:color-mix(in srgb,var(--grey) 45%, transparent); background:color-mix(in srgb,var(--grey) 12%, transparent);}
-  .pill.rev{color:var(--blue); border-color:color-mix(in srgb,var(--blue) 45%, transparent); background:color-mix(in srgb,var(--blue) 12%, transparent);}
-  .pill.lrn{color:var(--amber); border-color:color-mix(in srgb,var(--amber) 45%, transparent); background:color-mix(in srgb,var(--amber) 12%, transparent);}
-  .pill.mas{color:var(--green); border-color:color-mix(in srgb,var(--green) 45%, transparent); background:color-mix(in srgb,var(--green) 12%, transparent);}
-
-  /* sections */
-  section{padding:60px 0;}
-  .section-head{text-align:center; max-width:42ch; margin:0 auto 40px;}
-  .section-head h2{font-size:clamp(1.6rem,3vw,2.1rem); margin:0 0 .4rem;}
-  .section-head p{color:var(--dim); margin:0;}
-
-  /* progression band */
-  .prog{background:linear-gradient(180deg,var(--surface),var(--bg)); border-top:1px solid var(--border);
-    border-bottom:1px solid var(--border);}
-  .ladder{display:flex; align-items:center; justify-content:center; gap:0; flex-wrap:wrap;}
-  .ladder .pill{font-size:.92rem; padding:.4em .9em;}
-  .ladder .arrow{color:var(--dim); margin:0 .8em; flex:0 0 auto;}
-  .prog .cap{text-align:center; color:var(--dim); margin:1.1rem auto 0; max-width:48ch;}
-
-  /* features */
-  .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:18px;}
-  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
-    padding:22px; transition:border-color .15s ease, transform .15s ease;}
-  .card:hover{border-color:#33414f; transform:translateY(-2px);}
-  .card .ic{width:38px; height:38px; border-radius:10px; display:grid; place-items:center;
-    background:color-mix(in srgb,var(--blue) 14%, transparent); color:var(--blue); margin-bottom:14px;}
-  .card .ic svg{width:20px; height:20px;}
-  .card h3{font-size:1.05rem; margin:0 0 .3rem;}
-  .card p{margin:0; color:var(--dim); font-size:.94rem;}
-
-  /* showcase */
-  .show{display:grid; grid-template-columns:1fr 1fr; gap:48px; align-items:center;}
-  .show + .show{margin-top:30px;}
-  .show.flip .copy{order:2;}
-  .show h2{font-size:clamp(1.5rem,2.6vw,2rem); margin:0 0 .5rem;}
-  .show p{color:var(--dim); margin:0; font-size:1.04rem;}
-  .show img{border:1px solid var(--border); border-radius:var(--radius);
-    box-shadow:0 24px 60px -30px rgba(0,0,0,.7);}
-
-  /* privacy strip */
-  .privacy{background:var(--surface); border:1px solid var(--border); border-radius:18px;
-    padding:42px; text-align:center;}
-  .privacy h2{font-size:clamp(1.5rem,2.6vw,1.9rem); margin:0 0 .5rem;}
-  .privacy p{color:var(--dim); max-width:60ch; margin:0 auto 1.1rem;}
-
-  /* cta band */
-  .ctaband{text-align:center; background:
-      radial-gradient(40rem 18rem at 50% 0%, rgba(79,140,255,.14), transparent 60%);}
-  .ctaband h2{font-size:clamp(1.8rem,3.4vw,2.4rem); margin:0 0 1.2rem;}
-
-  /* footer */
-  footer{border-top:1px solid var(--border); padding:46px 0 34px; color:var(--dim);}
-  .foot-grid{display:grid; grid-template-columns:1.4fr 1fr 1fr 1fr; gap:30px;}
-  .foot-grid h4{font-size:.8rem; text-transform:uppercase; letter-spacing:.07em; color:var(--text);
-    margin:0 0 .7rem; font-family:Inter,sans-serif; font-weight:600;}
-  .foot-grid a{display:block; color:var(--dim); font-size:.92rem; padding:.18em 0;}
-  .foot-grid a:hover{color:var(--text); text-decoration:none;}
-  .foot-grid .brand{display:flex; align-items:center; padding:0;}
-  .foot-bottom{display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:space-between;
-    margin-top:34px; padding-top:22px; border-top:1px solid var(--border); font-size:.86rem;}
-  .attrib{color:var(--dim);}
-
-  /* reveal animation */
-  .reveal{opacity:0; transform:translateY(16px); transition:opacity .6s ease, transform .6s ease;}
-  .reveal.in{opacity:1; transform:none;}
-
-  /* responsive */
-  @media (max-width:880px){
-    .hero .wrap{grid-template-columns:1fr; gap:38px; padding-top:44px; padding-bottom:56px;}
-    .lede{max-width:none;}
-    .grid{grid-template-columns:repeat(2,1fr);}
-    .show{grid-template-columns:1fr; gap:24px;}
-    .show.flip .copy{order:0;}
-    .nav-desktop{display:none;}
-    .foot-grid{grid-template-columns:1fr 1fr;}
-  }
-  @media (max-width:560px){
-    .grid{grid-template-columns:1fr;}
-    .privacy{padding:28px 20px;}
-    .foot-grid{grid-template-columns:1fr;}
-  }
-  @media (prefers-reduced-motion:reduce){
-    html{scroll-behavior:auto;}
-    .shot img{animation:none;}
-    .reveal{opacity:1; transform:none; transition:none;}
-  }
-  :focus-visible{outline:2px solid var(--blue); outline-offset:2px; border-radius:6px;}
-</style>
-</head>
-<body>
-
-<!-- NAV -->
-<nav class="nav">
-  <div class="wrap">
-    <a class="brand" href="/"><img src="/assets/icon.png" alt=""> Lingueez</a>
-    <div class="spacer"></div>
-    <div class="nav-links nav-desktop">
-      <a href="#features"><span lang="en">Features</span><span lang="uk">Можливості</span></a>
-      <a href="#support"><span lang="en">Support</span><span lang="uk">Підтримати</span></a>
-      <a href="https://github.com/lysak-yurii/Lingueez"><span lang="en">Open source</span><span lang="uk">Відкритий код</span></a>
-    </div>
-    <div class="lang" role="group" aria-label="Language">
-      <button data-lang-btn="en" aria-pressed="true">EN</button>
-      <button data-lang-btn="uk" aria-pressed="false">UK</button>
-    </div>
-    <a class="btn btn-primary nav-desktop" href="https://github.com/lysak-yurii/Lingueez/releases">
-      <span lang="en">Download</span><span lang="uk">Завантажити</span></a>
-  </div>
-</nav>
+    @media (prefers-reduced-motion:reduce){ .shot img{animation:none;} }
+    @media (max-width:560px){ .privacy{padding:28px 20px;} }
+  </style>
+---
 
 <!-- HERO -->
 <header class="hero">
@@ -226,9 +42,9 @@ document.documentElement.setAttribute('data-lang',s);})();
       <p class="lede" lang="en">Save words as you discover them, get instant translations, practice with audio, and track your progress from first encounter to mastery. Read real-world content with synchronized translations and audio—all in one place.</p>
       <p class="lede" lang="uk">Зберігайте нові слова, отримуйте миттєві переклади, закріплюйте лексику за допомогою аудіо та відстежуйте свій прогрес від першого знайомства до повного засвоєння. Читайте реальні тексти із синхронним перекладом та озвученням — усе в одному застосунку.</p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="https://github.com/lysak-yurii/Lingueez/releases">
+        <a class="btn btn-primary" href="https://github.com/lysak-yurii/lingueez/releases">
           <span lang="en">Download</span><span lang="uk">Завантажити</span></a>
-        <a class="btn btn-ghost" href="https://github.com/lysak-yurii/Lingueez">
+        <a class="btn btn-ghost" href="https://github.com/lysak-yurii/lingueez">
           <span lang="en">View on GitHub</span><span lang="uk">Переглянути на GitHub</span></a>
       </div>
       <p class="trust">
@@ -300,6 +116,23 @@ document.documentElement.setAttribute('data-lang',s);})();
   </div>
 </section>
 
+<!-- E-READER TEASER -->
+<section>
+  <div class="wrap">
+    <div class="show reveal">
+      <div class="copy">
+        <p class="eyebrow"><span lang="en">Also on your e-reader</span><span lang="uk">Також на вашому е-читачі</span></p>
+        <h2><span lang="en">Save words straight from your books</span><span lang="uk">Зберігайте слова прямо з книжок</span></h2>
+        <p><span lang="en">The Lingueez plugin for KOReader lets you look up a word while you read, save it with its translation, and review it with flashcards on the device. Everything syncs to the same account as the desktop and web apps.</span><span lang="uk">Плагін Lingueez для KOReader дозволяє переглянути слово під час читання, зберегти його з перекладом і повторювати за допомогою флешкарток прямо на пристрої. Усе синхронізується з тим самим обліковим записом, що й застосунки для комп’ютера та вебу.</span></p>
+        <div class="cta-row" style="margin-top:1.4rem;">
+          <a class="btn btn-primary" href="/koreader/"><span lang="en">Explore the e-reader plugin</span><span lang="uk">Докладніше про плагін для е-читача</span></a>
+        </div>
+      </div>
+      <img src="/assets/koreader/flashcards.png" alt="Reviewing saved words with flashcards on a KOReader e-reader." style="max-width:340px; margin:0 auto;">
+    </div>
+  </div>
+</section>
+
 <!-- PRIVACY -->
 <section>
   <div class="wrap reveal">
@@ -331,74 +164,8 @@ document.documentElement.setAttribute('data-lang',s);})();
   <div class="wrap reveal">
     <h2><span lang="en">Start building a stronger vocabulary today</span><span lang="uk">Почніть розширювати свій словниковий запас вже сьогодні</span></h2>
     <div class="cta-row" style="justify-content:center;">
-      <a class="btn btn-primary" href="https://github.com/lysak-yurii/Lingueez/releases"><span lang="en">Download</span><span lang="uk">Завантажити</span></a>
-      <a class="btn btn-ghost" href="https://github.com/lysak-yurii/Lingueez"><span lang="en">View on GitHub</span><span lang="uk">Переглянути на GitHub</span></a>
+      <a class="btn btn-primary" href="https://github.com/lysak-yurii/lingueez/releases"><span lang="en">Download</span><span lang="uk">Завантажити</span></a>
+      <a class="btn btn-ghost" href="https://github.com/lysak-yurii/lingueez"><span lang="en">View on GitHub</span><span lang="uk">Переглянути на GitHub</span></a>
     </div>
   </div>
 </section>
-
-<!-- FOOTER -->
-<footer>
-  <div class="wrap">
-    <div class="foot-grid">
-      <div>
-        <a class="brand" href="/" style="font-size:1.05rem;"><img src="/assets/icon.png" alt="" style="width:24px;height:24px;"> Lingueez</a>
-        <p style="margin:.7rem 0 0; max-width:30ch;"><span lang="en">Build vocabulary with confidence—across every language you learn.</span><span lang="uk">Вивчайте лексику впевнено — незалежно від того, яку мову ви опановуєте.</span></p>
-      </div>
-      <div>
-        <h4><span lang="en">Product</span><span lang="uk">Продукт</span></h4>
-        <a href="#features"><span lang="en">Features</span><span lang="uk">Можливості</span></a>
-        <a href="https://github.com/lysak-yurii/Lingueez/releases"><span lang="en">Download</span><span lang="uk">Завантажити</span></a>
-        <a href="https://github.com/lysak-yurii/Lingueez"><span lang="en">Source code</span><span lang="uk">Вихідний код</span></a>
-        <a href="#support"><span lang="en">Support</span><span lang="uk">Підтримати</span></a>
-      </div>
-      <div>
-        <h4><span lang="en">Legal</span><span lang="uk">Правова інформація</span></h4>
-        <a href="/legal/privacy-policy/"><span lang="en">Privacy Policy</span><span lang="uk">Політика конфіденційності</span></a>
-        <a href="/legal/terms-of-service/"><span lang="en">Terms</span><span lang="uk">Умови</span></a>
-      </div>
-      <div>
-        <h4><span lang="en">Contact</span><span lang="uk">Контакти</span></h4>
-        <a href="mailto:support@lingueez.app">support@lingueez.app</a>
-      </div>
-    </div>
-    <div class="foot-bottom">
-      <span class="attrib">© 2024–2026 Lingueez — created by Yurii Lysak</span>
-      <span class="lang" role="group" aria-label="Language">
-        <button data-lang-btn="en" aria-pressed="true">EN</button>
-        <button data-lang-btn="uk" aria-pressed="false">UK</button>
-      </span>
-    </div>
-  </div>
-</footer>
-
-<script>
-(function(){
-  function setLang(l){
-    document.documentElement.setAttribute('data-lang',l);
-    try{localStorage.setItem('lz-lang',l);}catch(e){}
-    document.querySelectorAll('[data-lang-btn]').forEach(function(b){
-      b.setAttribute('aria-pressed', String(b.getAttribute('data-lang-btn')===l));
-    });
-  }
-  document.querySelectorAll('[data-lang-btn]').forEach(function(b){
-    b.addEventListener('click', function(){ setLang(b.getAttribute('data-lang-btn')); });
-  });
-  setLang(document.documentElement.getAttribute('data-lang') || 'en');
-
-  var nav=document.querySelector('.nav');
-  function onScroll(){ nav.classList.toggle('scrolled', window.scrollY>8); }
-  window.addEventListener('scroll', onScroll, {passive:true}); onScroll();
-
-  if('IntersectionObserver' in window){
-    var io=new IntersectionObserver(function(es){
-      es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
-    },{threshold:.12});
-    document.querySelectorAll('.reveal').forEach(function(e){ io.observe(e); });
-  } else {
-    document.querySelectorAll('.reveal').forEach(function(e){ e.classList.add('in'); });
-  }
-})();
-</script>
-</body>
-</html>
