@@ -16,8 +16,8 @@ settings.cfg
 accounts.json
 
 # Runtime files
-app.log
-crash.log
+app.log*
+crash.log*
 app.lock
 window_geometry.json
 *.last_sync

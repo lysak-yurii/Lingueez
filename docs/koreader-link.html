@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Link your e-reader — Lingueez</title>
+<!--
+  Standalone relay page for the KOReader plugin's phone-assisted Google sign-in.
+  Deliberately NOT part of any SPA: no supabase-js, so it never tries to consume
+  the ?code= itself. It just hands the OAuth authorization code to the device_auth
+  rendezvous table (keyed by a random device id), which the reader is polling.
+
+  The auth code is PKCE-bound — useless without the code_verifier held on the
+  reader — so relaying it through this public table is safe. The anon key below is
+  a public client key (same one the apps ship); Row-Level Security protects data.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center;
+    justify-content: center; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f1115; color: #e8eaed; padding: 24px;
+  }
+  .card {
+    max-width: 420px; width: 100%; background: #181b21; border: 1px solid #262b33;
+    border-radius: 16px; padding: 32px 28px; text-align: center;
+    box-shadow: 0 10px 40px rgba(0,0,0,.35);
+  }
+  .icon { font-size: 48px; line-height: 1; margin-bottom: 12px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { margin: 0; color: #aab2bd; font-size: 15px; line-height: 1.5; }
+  .spinner {
+    width: 36px; height: 36px; margin: 4px auto 14px; border-radius: 50%;
+    border: 3px solid #2c323c; border-top-color: #6aa3ff; animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ok    { color: #56d364; }
+  .err   { color: #f0796f; }
+  .brand { margin-top: 22px; font-size: 12px; color: #5b636e; letter-spacing: .04em; }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="spinner" id="spinner"></div>
+    <h1 id="title">Linking your e-reader…</h1>
+    <p id="msg">One moment.</p>
+    <div class="brand">LINGUEEZ</div>
+  </div>
+
+<script>
+(function () {
+  // Central Lingueez project — public anon key (RLS protects data).
+  var SUPABASE_URL = "https://dtyrmkynrideeknsdlrn.supabase.co";
+  var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0eXJta3lucmlkZWVrbnNkbHJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4Njc1MTQsImV4cCI6MjA5NzQ0MzUxNH0.dds5SyMBN9u-0TUumB2nSCx68FJfpm3n63fLq1n9o10";
+
+  function show(icon, title, message, cls) {
+    document.getElementById("spinner").style.display = "none";
+    var t = document.getElementById("title");
+    var m = document.getElementById("msg");
+    t.textContent = title;
+    if (cls) t.className = cls;
+    m.innerHTML = message;
+    if (icon) {
+      var el = document.createElement("div");
+      el.className = "icon";
+      el.textContent = icon;
+      var card = document.getElementById("card");
+      card.insertBefore(el, card.firstChild);
+    }
+  }
+
+  var params = new URLSearchParams(window.location.search);
+  var device = params.get("device");
+  var code = params.get("code");
+  var oauthError = params.get("error_description") || params.get("error");
+
+  if (oauthError) {
+    show("⚠️", "Sign-in failed", oauthError, "err");
+    return;
+  }
+  if (!device || !code) {
+    show("⚠️", "Nothing to link",
+      "This page is opened automatically during e-reader sign-in. " +
+      "Please start again from your reader.", "err");
+    return;
+  }
+
+  fetch(SUPABASE_URL + "/rest/v1/device_auth", {
+    method: "POST",
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": "Bearer " + SUPABASE_KEY,
+      "Content-Type": "application/json",
+      "Prefer": "resolution=merge-duplicates"
+    },
+    body: JSON.stringify({ device_id: device, code: code })
+  }).then(function (res) {
+    if (res.ok) {
+      show("✓", "Signed in",
+        "You can close this tab and return to your e-reader — " +
+        "it will finish signing in automatically.", "ok");
+    } else {
+      return res.text().then(function (body) {
+        show("⚠️", "Couldn't link",
+          "The reader couldn't be reached (" + res.status + "). " +
+          "Please try signing in again from your reader.", "err");
+        if (window.console) console.error("device_auth insert failed:", res.status, body);
+      });
+    }
+  }).catch(function (e) {
+    show("⚠️", "Network error",
+      "Couldn't reach the server. Check your connection and try again from your reader.", "err");
+    if (window.console) console.error(e);
+  });
+})();
+</script>
+</body>
+</html>
