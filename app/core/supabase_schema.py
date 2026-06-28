@@ -54,7 +54,9 @@ SCHEMA_SQL = """\
 -- =====================================================================
 -- Lingueez cloud sync schema (multi-user, Row-Level Security ON).
 -- Run once in a fresh EU-region Supabase project's SQL editor.
--- Only these four tables are synced; everything else stays on each device.
+-- The desktop app syncs only the four dictionary tables (words/texts/tags/
+-- word_tags); the learning/stats tables and device_auth below are for the
+-- Lingueez web app and the KOReader plugin sharing this same backend.
 -- Safe to re-run (idempotent).
 -- =====================================================================
 
@@ -125,6 +127,106 @@ create policy own_rows on tags      for all using (auth.uid() = user_id) with ch
 drop policy if exists own_rows on word_tags;
 create policy own_rows on word_tags for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- ---- Learning / stats tables (used by the Lingueez WEB app) -----------
+-- The desktop app doesn't use these (it keeps learning data on-device); they
+-- live here so the Lingueez web app, pointed at this project, can store
+-- sessions, spaced-repetition progress, quiz results, AI tutor chats, per-word
+-- AI context and settings. Same per-user model + RLS as the dictionary tables.
+create table if not exists word_progress (
+    user_id       uuid not null default auth.uid() references auth.users(id) on delete cascade,
+    word_id       uuid not null references words(id) on delete cascade,
+    last_reviewed timestamptz,
+    next_review   timestamptz,
+    difficulty    integer default 3,
+    review_count  integer default 0,
+    correct_count integer default 0,
+    ease_factor   real    default 2.5,
+    interval_days integer default 1,
+    created_at    timestamptz default now(),
+    updated_at    timestamptz default now(),
+    primary key (user_id, word_id)
+);
+create index if not exists idx_word_progress_user_next_review on word_progress(user_id, next_review);
+
+create table if not exists learning_sessions (
+    id            uuid primary key default gen_random_uuid(),
+    user_id       uuid not null default auth.uid() references auth.users(id) on delete cascade,
+    session_type  text,
+    word_ids      text,
+    started_at    timestamptz default now(),
+    completed_at  timestamptz,
+    words_studied integer default 0,
+    words_correct integer default 0
+);
+create index if not exists idx_learning_sessions_user_started on learning_sessions(user_id, started_at);
+
+create table if not exists quiz_results (
+    id             uuid primary key default gen_random_uuid(),
+    user_id        uuid not null default auth.uid() references auth.users(id) on delete cascade,
+    session_id     uuid references learning_sessions(id) on delete cascade,
+    word_id        uuid references words(id) on delete cascade,
+    question       text,
+    user_answer    integer,
+    correct_answer integer,
+    is_correct     boolean,
+    answered_at    timestamptz default now()
+);
+create index if not exists idx_quiz_results_session_id on quiz_results(session_id);
+create index if not exists idx_quiz_results_user_word on quiz_results(user_id, word_id);
+
+create table if not exists ai_conversations (
+    id         uuid primary key default gen_random_uuid(),
+    user_id    uuid not null default auth.uid() references auth.users(id) on delete cascade,
+    messages   text,
+    title      text,
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+);
+create index if not exists idx_ai_conversations_user on ai_conversations(user_id);
+
+create table if not exists word_context (
+    user_id           uuid not null default auth.uid() references auth.users(id) on delete cascade,
+    word_id           uuid not null references words(id) on delete cascade,
+    example_sentences jsonb default '[]',
+    collocations      jsonb default '[]',
+    usage_patterns    jsonb default '{}',
+    synonyms          jsonb default '[]',
+    antonyms          jsonb default '[]',
+    difficulty_level  text default 'intermediate',
+    frequency_rank    integer,
+    created_at        timestamptz default now(),
+    updated_at        timestamptz default now(),
+    primary key (user_id, word_id)
+);
+create index if not exists idx_word_context_updated on word_context(updated_at);
+
+create table if not exists user_settings (
+    user_id                uuid primary key default auth.uid() references auth.users(id) on delete cascade,
+    activity_defaults      jsonb default '{}',
+    flashcard_show_context boolean default false,
+    updated_at             timestamptz default now()
+);
+
+alter table word_progress     enable row level security;
+alter table learning_sessions enable row level security;
+alter table quiz_results      enable row level security;
+alter table ai_conversations  enable row level security;
+alter table word_context      enable row level security;
+alter table user_settings     enable row level security;
+
+drop policy if exists own_rows on word_progress;
+create policy own_rows on word_progress     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists own_rows on learning_sessions;
+create policy own_rows on learning_sessions for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists own_rows on quiz_results;
+create policy own_rows on quiz_results      for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists own_rows on ai_conversations;
+create policy own_rows on ai_conversations  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists own_rows on word_context;
+create policy own_rows on word_context      for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists own_rows on user_settings;
+create policy own_rows on user_settings     for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
 -- ---- Open registration --------------------------------------------------
 -- Anyone may sign up; there is no invite allowlist. New accounts are verified by
 -- a 6-digit email code (configure SMTP + the "Confirm signup" email template to
@@ -150,6 +252,28 @@ $$;
 revoke all on function public.delete_account() from public, anon;
 grant execute on function public.delete_account() to authenticated;
 
+-- ---- Device-link rendezvous for the KOReader plugin's QR Google sign-in --
+-- The reader shows a QR of the Google authorize URL; the phone completes OAuth
+-- and a small static page drops the returned auth code here, keyed by a random
+-- device_id; the reader polls for it and finishes the PKCE exchange itself. The
+-- stored code is PKCE-bound (useless without the code_verifier that never leaves
+-- the reader), so anon read access is safe; device_id is the lookup secret.
+create table if not exists device_auth (
+  device_id  text primary key,
+  code       text not null,
+  created_at timestamptz not null default now()
+);
+alter table device_auth enable row level security;
+
+-- Phone (anon) writes the code; reader (anon) reads it then deletes it.
+drop policy if exists device_auth_anon_insert on device_auth;
+create policy device_auth_anon_insert on device_auth for insert to anon with check (true);
+drop policy if exists device_auth_anon_select on device_auth;
+create policy device_auth_anon_select on device_auth for select to anon using (true);
+drop policy if exists device_auth_anon_delete on device_auth;
+create policy device_auth_anon_delete on device_auth for delete to anon using (true);
+grant insert, select, delete on device_auth to anon;
+
 -- =====================================================================
 -- RESET APPENDIX — run ONLY when upgrading a project that still has the OLD
 -- integer-id schema (words/texts/tags with bigint `id`/`tag_id`). The desktop
@@ -159,10 +283,16 @@ grant execute on function public.delete_account() to authenticated;
 -- so the local database is the source of truth. A brand-new project can ignore
 -- this. Run these drops, then run the whole script above again:
 --
---        drop table if exists word_tags cascade;
---        drop table if exists tags      cascade;
---        drop table if exists words     cascade;
---        drop table if exists texts     cascade;
+--        drop table if exists word_tags        cascade;
+--        drop table if exists tags             cascade;
+--        drop table if exists words            cascade;
+--        drop table if exists texts            cascade;
+--        drop table if exists word_progress     cascade;
+--        drop table if exists learning_sessions cascade;
+--        drop table if exists quiz_results      cascade;
+--        drop table if exists ai_conversations  cascade;
+--        drop table if exists word_context      cascade;
+--        drop table if exists user_settings     cascade;
 --
 -- (If this project still has the old invite-only allowlist, also drop it to open
 -- registration to everyone:
@@ -203,7 +333,8 @@ PERSONAL_SCHEMA_SQL = """\
 -- multi-user schema (it removes user_id and the per-user policies). Safe to re-run.
 -- WARNING: anyone with this project's URL + anon key can read this data —
 -- keep the project private and do not share the anon key.
--- Only these four tables are synced; everything else stays on each device.
+-- The apps sync only the four dictionary tables; the learning/stats tables at
+-- the end are created for the Lingueez web app (it stores progress there).
 -- =====================================================================
 
 -- ---- Tables (created only when this is a fresh project) ---------------
@@ -298,5 +429,114 @@ drop policy if exists allow_all on word_tags;
 create policy allow_all on word_tags for all to anon, authenticated using (true) with check (true);
 
 grant all on table words, texts, tags, word_tags to anon, authenticated;
+
+-- ---- Learning / stats tables (used by the Lingueez WEB app) -----------
+-- The desktop and phone apps DON'T use these — they keep learning data on the
+-- device. They're included so the Lingueez web app, pointed at this same
+-- project, can store sessions, spaced-repetition progress, quiz results, AI
+-- tutor chats, per-word AI context and settings. Without them, starting any web
+-- activity fails with "Failed to create session". `user_id` holds the web
+-- account id (a plain column — a personal project has no auth), and `word_id`
+-- references your words so progress is cleaned up when a word is deleted.
+create table if not exists word_progress (
+    user_id       uuid not null,
+    word_id       uuid not null references words(id) on delete cascade,
+    last_reviewed timestamptz,
+    next_review   timestamptz,
+    difficulty    integer default 3,
+    review_count  integer default 0,
+    correct_count integer default 0,
+    ease_factor   real    default 2.5,
+    interval_days integer default 1,
+    created_at    timestamptz default now(),
+    updated_at    timestamptz default now(),
+    primary key (user_id, word_id)
+);
+create index if not exists idx_word_progress_user_next_review on word_progress(user_id, next_review);
+
+create table if not exists learning_sessions (
+    id            uuid primary key default gen_random_uuid(),
+    user_id       uuid not null,
+    session_type  text,
+    word_ids      text,
+    started_at    timestamptz default now(),
+    completed_at  timestamptz,
+    words_studied integer default 0,
+    words_correct integer default 0
+);
+create index if not exists idx_learning_sessions_user_started on learning_sessions(user_id, started_at);
+
+create table if not exists quiz_results (
+    id             uuid primary key default gen_random_uuid(),
+    user_id        uuid not null,
+    session_id     uuid references learning_sessions(id) on delete cascade,
+    word_id        uuid references words(id) on delete cascade,
+    question       text,
+    user_answer    integer,
+    correct_answer integer,
+    is_correct     boolean,
+    answered_at    timestamptz default now()
+);
+create index if not exists idx_quiz_results_session_id on quiz_results(session_id);
+create index if not exists idx_quiz_results_user_word on quiz_results(user_id, word_id);
+
+create table if not exists ai_conversations (
+    id         uuid primary key default gen_random_uuid(),
+    user_id    uuid not null,
+    messages   text,
+    title      text,
+    created_at timestamptz default now(),
+    updated_at timestamptz default now()
+);
+create index if not exists idx_ai_conversations_user on ai_conversations(user_id);
+
+create table if not exists word_context (
+    user_id           uuid not null,
+    word_id           uuid not null references words(id) on delete cascade,
+    example_sentences jsonb default '[]',
+    collocations      jsonb default '[]',
+    usage_patterns    jsonb default '{}',
+    synonyms          jsonb default '[]',
+    antonyms          jsonb default '[]',
+    difficulty_level  text default 'intermediate',
+    frequency_rank    integer,
+    created_at        timestamptz default now(),
+    updated_at        timestamptz default now(),
+    primary key (user_id, word_id)
+);
+create index if not exists idx_word_context_updated on word_context(updated_at);
+
+create table if not exists user_settings (
+    user_id                uuid primary key,
+    activity_defaults      jsonb default '{}',
+    flashcard_show_context boolean default false,
+    updated_at             timestamptz default now()
+);
+
+-- Open anon access, the safe way (same as the dictionary tables above): keep RLS
+-- ENABLED with a permissive policy so Supabase's "enable RLS" nag is satisfied
+-- and can't silently lock the tables. Also converts tables previously created
+-- RLS-off.
+alter table word_progress     enable row level security;
+alter table learning_sessions enable row level security;
+alter table quiz_results      enable row level security;
+alter table ai_conversations  enable row level security;
+alter table word_context      enable row level security;
+alter table user_settings     enable row level security;
+
+drop policy if exists allow_all on word_progress;
+create policy allow_all on word_progress     for all to anon, authenticated using (true) with check (true);
+drop policy if exists allow_all on learning_sessions;
+create policy allow_all on learning_sessions for all to anon, authenticated using (true) with check (true);
+drop policy if exists allow_all on quiz_results;
+create policy allow_all on quiz_results      for all to anon, authenticated using (true) with check (true);
+drop policy if exists allow_all on ai_conversations;
+create policy allow_all on ai_conversations  for all to anon, authenticated using (true) with check (true);
+drop policy if exists allow_all on word_context;
+create policy allow_all on word_context      for all to anon, authenticated using (true) with check (true);
+drop policy if exists allow_all on user_settings;
+create policy allow_all on user_settings     for all to anon, authenticated using (true) with check (true);
+
+grant all on table word_progress, learning_sessions, quiz_results, ai_conversations, word_context, user_settings to anon, authenticated;
 -- =====================================================================
 """
