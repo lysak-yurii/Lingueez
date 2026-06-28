@@ -3,7 +3,7 @@ layout: marketing
 permalink: /koreader/
 title: Lingueez for KOReader — save words from your e-reader
 description: A free, open-source KOReader plugin that saves words straight from your books into your Lingueez vocabulary — translated, language-detected, and synced to the desktop and web apps.
-image: https://lingueez.app/assets/koreader/flashcards.png
+image: https://lingueez.app/assets/koreader/lingueez_hero.jpg
 canonical: https://lingueez.app/koreader/
 nav_active: koreader
 head_extra: |
@@ -12,6 +12,8 @@ head_extra: |
     .device img{max-width:320px; margin:0 auto; border-radius:18px;
       box-shadow:0 28px 64px -30px rgba(0,0,0,.8);}
     .kh1 .accent{color:var(--blue);}
+    /* hero illustration: keep its native landscape ratio, never stretch */
+    .shot img{height:auto;}
     /* numbered steps */
     .steps{list-style:none; counter-reset:step; padding:0; margin:0; max-width:640px;}
     .steps li{counter-increment:step; position:relative; padding:0 0 0 52px; margin:0 0 1.1em;}
@@ -47,8 +49,8 @@ head_extra: |
         <b><span lang="en">Works with your Lingueez account</span><span lang="uk">Працює з вашим акаунтом Lingueez</span></b>
       </p>
     </div>
-    <div class="shot device">
-      <img src="/assets/koreader/save-word.png" alt="Saving a word to Lingueez from a book on a KOReader e-reader.">
+    <div class="shot">
+      <img src="/assets/koreader/lingueez_hero.jpg" alt="Saving a word from a book on a KOReader e-reader, translated and synced to the Lingueez desktop, tablet, and phone apps." width="1280" height="853">
     </div>
   </div>
 </header>
@@ -96,11 +98,14 @@ head_extra: |
 
 <!-- SYNC EVERYWHERE -->
 <section>
-  <div class="wrap reveal">
-    <div class="privacy" style="background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:42px; text-align:center;">
-      <h2 style="font-size:clamp(1.5rem,2.6vw,1.9rem); margin:0 0 .5rem;"><span lang="en">Your vocabulary, always with you</span><span lang="uk">Ваш словник завжди з вами</span></h2>
-      <p class="note" style="margin:0 auto 1.1rem;"><span lang="en">Everything you save on your reader syncs to the same account as the Lingueez desktop and web apps. Study with full flashcards, audio, statistics, and side-by-side reading on your computer — your reader is simply one more place to add words.</span><span lang="uk">Усе, що ви зберігаєте на читачі, синхронізується з тим самим акаунтом, що й застосунки Lingueez для комп’ютера та вебу. Навчайтеся з повноцінними флешкартками, аудіо, статистикою та паралельним читанням на комп’ютері, а читач стає ще одним місцем, де ви поповнюєте свій словник.</span></p>
-      <a class="btn btn-ghost" href="/"><span lang="en">See the desktop app</span><span lang="uk">Переглянути застосунок для комп’ютера</span></a>
+  <div class="wrap">
+    <div class="show reveal">
+      <div class="copy">
+        <h2><span lang="en">Your vocabulary, always with you</span><span lang="uk">Ваш словник завжди з вами</span></h2>
+        <p><span lang="en">Everything you save on your reader syncs to the same account as the Lingueez desktop and web apps. Study with full flashcards, audio, statistics, and side-by-side reading on your computer — your reader is simply one more place to add words.</span><span lang="uk">Усе, що ви зберігаєте на читачі, синхронізується з тим самим акаунтом, що й застосунки Lingueez для комп’ютера та вебу. Навчайтеся з повноцінними флешкартками, аудіо, статистикою та паралельним читанням на комп’ютері, а читач стає ще одним місцем, де ви поповнюєте свій словник.</span></p>
+        <a class="btn btn-ghost" href="/" style="margin-top:1.2rem;"><span lang="en">See the desktop app</span><span lang="uk">Переглянути застосунок для комп’ютера</span></a>
+      </div>
+      <div><img src="/assets/koreader/menu.png" alt="The Lingueez menu on a KOReader e-reader: View My Words, Flashcards, Save current chapter as text, and Cloud texts."></div>
     </div>
   </div>
 </section>
