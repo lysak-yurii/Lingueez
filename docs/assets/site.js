@@ -20,6 +20,19 @@
     window.addEventListener('scroll', onScroll, {passive:true}); onScroll();
   }
 
+  // Mobile nav: toggle the hamburger dropdown.
+  var navToggle=document.querySelector('.nav-toggle');
+  if(nav && navToggle){
+    var navMenu=document.getElementById('nav-menu');
+    var setNavOpen=function(open){
+      nav.classList.toggle('open', open);
+      navToggle.setAttribute('aria-expanded', String(open));
+    };
+    navToggle.addEventListener('click', function(){ setNavOpen(!nav.classList.contains('open')); });
+    if(navMenu){ navMenu.addEventListener('click', function(e){ if(e.target.closest('a')) setNavOpen(false); }); }
+    document.addEventListener('keydown', function(e){ if(e.key==='Escape') setNavOpen(false); });
+  }
+
   if('IntersectionObserver' in window){
     var io=new IntersectionObserver(function(es){
       es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });

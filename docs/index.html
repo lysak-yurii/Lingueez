@@ -27,8 +27,69 @@ head_extra: |
     .privacy h2{font-size:clamp(1.5rem,2.6vw,1.9rem); margin:0 0 .5rem;}
     .privacy p{color:var(--dim); max-width:60ch; margin:0 auto 1.1rem;}
 
-    @media (prefers-reduced-motion:reduce){ .shot img{animation:none;} }
-    @media (max-width:560px){ .privacy{padding:28px 20px;} }
+    /* ===== Web-section sign-in: living word card + inline login ===== */
+    .enter{position:relative;}
+    .enter::before{content:""; position:absolute; inset:-12% -8% -16% -8%; z-index:-1;
+      background:radial-gradient(closest-side, rgba(79,140,255,.20), transparent 72%),
+                 radial-gradient(closest-side, rgba(63,185,80,.12), transparent 70%);
+      filter:blur(10px);}
+    .panel{background:linear-gradient(180deg,var(--surface),var(--surface2)); border:1px solid var(--border);
+      border-radius:18px; overflow:hidden; box-shadow:0 30px 70px -32px rgba(0,0,0,.8);}
+
+    .wordcard{padding:22px 22px 20px;}
+    .wc-top{display:flex; align-items:center; justify-content:space-between; gap:12px;}
+    .wc-from{font-size:.66rem; letter-spacing:.12em; color:var(--dim); text-transform:uppercase; font-weight:600;}
+    .wc-word{font-family:"Space Grotesk",Inter,sans-serif; font-weight:600; font-size:2rem;
+      line-height:1.1; margin:.5rem 0 .1rem; letter-spacing:-.01em;}
+    .wc-meta{display:flex; align-items:baseline; gap:.7em; color:var(--dim);}
+    .wc-ipa{font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace; font-size:.9rem; color:var(--text);}
+    .wc-pos{font-style:italic; font-size:.9rem;}
+    .wc-gloss{margin:.55rem 0 1.1rem; color:var(--text); font-size:1.02rem; line-height:1.5;}
+    .wc-gloss::before{content:"\2192\00a0"; color:var(--blue);}
+    .wc-fade{transition:opacity .28s ease, transform .28s ease;}
+    .wc-fade.out{opacity:0; transform:translateY(5px);}
+
+    .track{display:grid; grid-template-columns:repeat(4,1fr); gap:0; margin-top:4px;}
+    .track .step{position:relative; display:flex; flex-direction:column; align-items:center; gap:7px; padding-top:13px;}
+    .track .rail{position:absolute; top:4px; left:-50%; right:50%; height:2px; background:var(--border);}
+    .track .step:first-child .rail{display:none;}
+    .track .step.fill .rail{background:linear-gradient(90deg,var(--grey),var(--stepc,var(--blue)));}
+    .track .dot{width:9px; height:9px; border-radius:50%; background:var(--surface2);
+      border:2px solid var(--border); position:relative; z-index:1; transition:all .3s ease;}
+    .track .step.fill .dot{background:var(--stepc); border-color:var(--stepc);}
+    .track .step.on .dot{width:13px; height:13px; box-shadow:0 0 0 5px color-mix(in srgb,var(--stepc) 22%,transparent);}
+    .track .lbl{font-size:.6rem; letter-spacing:.04em; text-transform:uppercase; color:var(--dim);
+      transition:color .3s ease; font-weight:600;}
+    .track .step.on .lbl{color:var(--stepc);}
+    .track .step.s-new{--stepc:var(--grey);} .track .step.s-rev{--stepc:var(--blue);}
+    .track .step.s-lrn{--stepc:var(--amber);} .track .step.s-mas{--stepc:var(--green);}
+
+    .seam{height:1px; background:linear-gradient(90deg,transparent,rgba(79,140,255,.26) 18%,rgba(79,140,255,.26) 82%,transparent);}
+
+    .signin{padding:20px 22px 22px;}
+    .si-h{font-size:1.18rem; margin:0 0 .9rem;}
+    .field{margin-bottom:11px;}
+    .field .row{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:5px;}
+    .field label{font-size:.78rem; color:var(--dim); font-weight:500;}
+    .field .forgot{font-size:.76rem;}
+    .signin input{width:100%; background:var(--bg2); border:1px solid var(--border); color:var(--text);
+      border-radius:10px; padding:.74em .85em; font:inherit; font-size:.95rem;
+      transition:border-color .15s ease, box-shadow .15s ease;}
+    .signin input::placeholder{color:#5b6878;}
+    .signin input:focus{outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(79,140,255,.16);}
+    .signin .btn{width:100%; justify-content:center; padding:.82em 1em;}
+    .si-err{color:#ff8f8f; font-size:.84rem; min-height:1.1em; margin:2px 0 8px; line-height:1.35;}
+    .si-or{display:flex; align-items:center; gap:12px; color:var(--dim); font-size:.78rem; margin:14px 0;}
+    .si-or::before,.si-or::after{content:""; flex:1; height:1px; background:var(--border);}
+    .si-alt{text-align:center; color:var(--dim); font-size:.88rem; margin:14px 0 0;}
+    .si-note{display:flex; align-items:center; gap:.5em; justify-content:center; color:var(--dim); font-size:.74rem; margin:12px 0 0;}
+    .si-note svg{width:13px; height:13px; opacity:.7; flex:0 0 auto;}
+    .si-google{display:inline-flex; align-items:center; gap:.6em;}
+    .btn[aria-busy="true"]{opacity:.65; pointer-events:none;}
+    @media (max-width:880px){ .enter{max-width:460px; margin:0 auto;} }
+
+    @media (prefers-reduced-motion:reduce){ .shot img{animation:none;} .wc-fade{transition:none;} }
+    @media (max-width:560px){ .privacy{padding:28px 20px;} .wc-word{font-size:1.7rem;} }
   </style>
 ---
 
@@ -130,7 +191,62 @@ head_extra: |
           <a class="btn btn-primary" href="https://web.lingueez.app/"><span lang="en">Open the web app</span><span lang="uk">Відкрити вебзастосунок</span></a>
         </div>
       </div>
-      <img src="/assets/web-app.png" alt="The Lingueez web app running in a browser, showing the vocabulary list.">
+
+      <div class="enter">
+        <div class="panel">
+          <!-- top: a living dictionary entry climbing New → Mastered -->
+          <div class="wordcard">
+            <div class="wc-top">
+              <span class="wc-from wc-fade" id="wc-from">French → English</span>
+              <span class="pill new wc-fade" id="wc-status"><span class="dot"></span><span lang="en">New</span><span lang="uk">Нове</span></span>
+            </div>
+            <div class="wc-word wc-fade" id="wc-word">dépaysement</div>
+            <div class="wc-meta wc-fade" id="wc-meta">
+              <span class="wc-ipa" id="wc-ipa">/de.pɛ.iz.mɑ̃/</span>
+              <span class="wc-pos" id="wc-pos"><span lang="en">noun</span><span lang="uk">іменник</span></span>
+            </div>
+            <div class="wc-gloss wc-fade" id="wc-gloss"><span lang="en">the feeling of being far from home</span><span lang="uk">відчуття перебування далеко від дому</span></div>
+            <div class="track" id="track">
+              <div class="step s-new fill on"><span class="rail"></span><span class="dot"></span><span class="lbl"><span lang="en">New</span><span lang="uk">Нове</span></span></div>
+              <div class="step s-rev"><span class="rail"></span><span class="dot"></span><span class="lbl"><span lang="en">Reviewing</span><span lang="uk">Перегляд</span></span></div>
+              <div class="step s-lrn"><span class="rail"></span><span class="dot"></span><span class="lbl"><span lang="en">Learning</span><span lang="uk">Вивчення</span></span></div>
+              <div class="step s-mas"><span class="rail"></span><span class="dot"></span><span class="lbl"><span lang="en">Mastered</span><span lang="uk">Засвоєно</span></span></div>
+            </div>
+          </div>
+
+          <div class="seam" role="presentation"></div>
+
+          <!-- bottom: sign in here, land in the web app already signed in -->
+          <div class="signin">
+            <h2 class="si-h"><span lang="en">Continue learning</span><span lang="uk">Продовжити навчання</span></h2>
+            <form id="signin-form" novalidate>
+              <div class="field">
+                <div class="row"><label for="si-email"><span lang="en">Email</span><span lang="uk">Ел. пошта</span></label></div>
+                <input id="si-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com">
+              </div>
+              <div class="field">
+                <div class="row">
+                  <label for="si-pass"><span lang="en">Password</span><span lang="uk">Пароль</span></label>
+                  <a class="forgot" href="https://web.lingueez.app/"><span lang="en">Forgot?</span><span lang="uk">Забули?</span></a>
+                </div>
+                <input id="si-pass" name="password" type="password" autocomplete="current-password" required placeholder="••••••••">
+              </div>
+              <p class="si-err" id="si-err" role="alert" aria-live="polite"></p>
+              <button class="btn btn-primary" type="submit" id="si-submit">
+                <span lang="en">Open my vocabulary →</span><span lang="uk">Відкрити мій словник →</span></button>
+            </form>
+            <div class="si-or"><span lang="en">or</span><span lang="uk">або</span></div>
+            <button class="btn btn-ghost si-google" type="button" id="si-google">
+              <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.71-1.57 2.68-3.89 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.02-3.7H.92v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.98 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.92a9 9 0 0 0 0 8.1l3.06-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .92 4.95L3.98 7.28C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+              <span lang="en">Continue with Google</span><span lang="uk">Увійти через Google</span></button>
+            <p class="si-alt"><span lang="en">New here?</span><span lang="uk">Уперше тут?</span>
+              <a href="https://web.lingueez.app/"><span lang="en">Create your account →</span><span lang="uk">Створіть акаунт →</span></a></p>
+            <p class="si-note">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span lang="en">One account for all your devices.</span><span lang="uk">Один акаунт для всіх пристроїв.</span></p>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -188,3 +304,120 @@ head_extra: |
     </div>
   </div>
 </section>
+
+<!-- supabase-js + inline sign-in: authenticate here, land in the web app already signed in -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+(function(){
+  /* ---- Living word card: cycle a few "untranslatable" words New → Mastered ---- */
+  var WORDS=[
+    {w:"dépaysement", ipa:"/de.pɛ.iz.mɑ̃/", from:["French → English","Французька → Англійська"], pos:["noun","іменник"], gloss:["the feeling of being far from home","відчуття перебування далеко від дому"], stage:"new"},
+    {w:"Feierabend", ipa:"/ˈfaɪ.ɐˌʔaːbn̩t/", from:["German → English","Німецька → Англійська"], pos:["noun","іменник"], gloss:["the calm once the workday is done","спокій, коли робочий день завершено"], stage:"rev"},
+    {w:"木漏れ日", ipa:"/ko.mo.ɾe.bi/", from:["Japanese → English","Японська → Англійська"], pos:["noun","іменник"], gloss:["sunlight filtering through the leaves","сонячне світло крізь листя"], stage:"lrn"},
+    {w:"meraki", ipa:"/meˈra.ki/", from:["Greek → English","Грецька → Англійська"], pos:["noun","іменник"], gloss:["the soul and love poured into your work","душа й любов, вкладені у твою справу"], stage:"mas"}
+  ];
+  var STAGES=["new","rev","lrn","mas"];
+  var STATUS={
+    new:'<span class="dot"></span><span lang="en">New</span><span lang="uk">Нове</span>',
+    rev:'<span class="dot"></span><span lang="en">Reviewing</span><span lang="uk">Переглянуто</span>',
+    lrn:'<span class="dot"></span><span lang="en">Learning</span><span lang="uk">Вивчається</span>',
+    mas:'<span class="dot"></span><span lang="en">Mastered</span><span lang="uk">Засвоєно</span>'
+  };
+  function byId(id){return document.getElementById(id);}
+  var el={from:byId("wc-from"),word:byId("wc-word"),ipa:byId("wc-ipa"),pos:byId("wc-pos"),
+          gloss:byId("wc-gloss"),status:byId("wc-status"),track:byId("track")};
+  function langSpans(arr){return '<span lang="en">'+arr[0]+'</span><span lang="uk">'+arr[1]+'</span>';}
+
+  function paint(d){
+    el.from.innerHTML=langSpans(d.from);
+    el.word.textContent=d.w;
+    el.ipa.textContent=d.ipa;
+    el.pos.innerHTML=langSpans(d.pos);
+    el.gloss.innerHTML=langSpans(d.gloss);
+    el.status.className="pill "+d.stage+" wc-fade";
+    el.status.innerHTML=STATUS[d.stage];
+    var active=STAGES.indexOf(d.stage), steps=el.track.children;
+    for(var i=0;i<steps.length;i++){
+      steps[i].classList.toggle("fill", i<=active);
+      steps[i].classList.toggle("on", i===active);
+    }
+  }
+
+  var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if(el.word && !reduce){
+    var idx=0, fades=document.querySelectorAll(".wc-fade");
+    setInterval(function(){
+      fades.forEach(function(f){f.classList.add("out");});
+      setTimeout(function(){
+        idx=(idx+1)%WORDS.length;
+        paint(WORDS[idx]);
+        fades.forEach(function(f){f.classList.remove("out");});
+      },300);
+    },3400);
+  }
+
+  /* ---- Inline sign-in → hand the session to the web app (lands signed in) ---- */
+  var SUPABASE_URL="https://dtyrmkynrideeknsdlrn.supabase.co";
+  var SUPABASE_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR0eXJta3lucmlkZWVrbnNkbHJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4Njc1MTQsImV4cCI6MjA5NzQ0MzUxNH0.dds5SyMBN9u-0TUumB2nSCx68FJfpm3n63fLq1n9o10";
+  var WEB_APP="https://web.lingueez.app/";
+
+  function t(en,uk){return document.documentElement.getAttribute("data-lang")==="uk"?uk:en;}
+  var form=byId("signin-form"), errBox=byId("si-err"),
+      submit=byId("si-submit"), googleBtn=byId("si-google");
+  if(!form) return;
+
+  var client=null;
+  function sb(){
+    if(client) return client;
+    if(!window.supabase||!window.supabase.createClient){
+      throw new Error(t("Couldn't reach the sign-in service. Please try again.","Не вдалося звернутися до служби входу. Спробуйте ще раз."));
+    }
+    client=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON,{auth:{persistSession:false,detectSessionInUrl:false}});
+    return client;
+  }
+  function showErr(msg){errBox.textContent=msg||"";}
+  function busy(btn,on){btn.setAttribute("aria-busy",on?"true":"false");}
+
+  function handOff(session){
+    var p=new URLSearchParams({
+      access_token:session.access_token,
+      refresh_token:session.refresh_token,
+      expires_in:String(session.expires_in),
+      expires_at:String(session.expires_at),
+      token_type:session.token_type||"bearer"
+    });
+    window.location.assign(WEB_APP+"#"+p.toString());
+  }
+  function mapError(error){
+    var m=(error&&error.message||"").toLowerCase();
+    if(m.indexOf("confirm")>-1) return t("Confirm your email first — check your inbox for the link.","Спершу підтвердьте електронну пошту — перевірте лист із посиланням.");
+    if(m.indexOf("invalid")>-1||m.indexOf("credentials")>-1) return t("We couldn't sign you in. Check your email and password.","Не вдалося увійти. Перевірте електронну пошту та пароль.");
+    return error&&error.message||t("Something went wrong. Please try again.","Щось пішло не так. Спробуйте ще раз.");
+  }
+
+  form.addEventListener("submit",function(e){
+    e.preventDefault();
+    showErr("");
+    var email=byId("si-email").value.trim(), pass=byId("si-pass").value;
+    if(!email||!pass){showErr(t("Enter your email and password to continue.","Введіть пошту та пароль, щоб продовжити."));return;}
+    busy(submit,true);
+    Promise.resolve().then(function(){return sb().auth.signInWithPassword({email:email,password:pass});})
+      .then(function(res){
+        if(res.error){busy(submit,false);showErr(mapError(res.error));return;}
+        if(res.data&&res.data.session){handOff(res.data.session);}
+        else{busy(submit,false);showErr(mapError({message:""}));}
+      })
+      .catch(function(err){busy(submit,false);showErr(err.message||mapError(err));});
+  });
+
+  googleBtn.addEventListener("click",function(){
+    showErr(""); busy(googleBtn,true);
+    Promise.resolve().then(function(){
+      return sb().auth.signInWithOAuth({provider:"google",options:{redirectTo:WEB_APP}});
+    }).then(function(res){
+      if(res.error){busy(googleBtn,false);showErr(mapError(res.error));}
+      /* on success the browser is already navigating to Google */
+    }).catch(function(err){busy(googleBtn,false);showErr(err.message||mapError(err));});
+  });
+})();
+</script>
