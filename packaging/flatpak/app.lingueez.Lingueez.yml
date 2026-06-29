@@ -5,9 +5,14 @@
 # checksum must be pinned. The first branch CI build will surface what needs
 # tuning — treat the deps/ffmpeg modules as the iteration points.
 id: app.lingueez.Lingueez
-runtime: org.freedesktop.Platform
-runtime-version: '24.08'
-sdk: org.freedesktop.Sdk
+runtime: org.kde.Platform
+runtime-version: '6.8'
+sdk: org.kde.Sdk
+# PySide6/shiboken6 can't be pip-vendored (flatpak-pip-generator refuses and points
+# here); they come from the PySide base app, which rides on org.kde.Platform//6.8
+# (Python 3.12 — matching the pinned cp312 wheels in python3-deps.json).
+base: io.qt.PySide.BaseApp
+base-version: '6.8'
 command: lingueez
 
 finish-args:

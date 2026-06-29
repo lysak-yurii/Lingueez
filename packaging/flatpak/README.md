@@ -9,31 +9,36 @@ Flathub. It builds the app **from source** (the Flathub-preferred way).
 - `app.lingueez.Lingueez.desktop` — desktop entry.
 - `app.lingueez.Lingueez.metainfo.xml` — AppStream metadata (required by Flathub).
 - `lingueez.sh` — in-sandbox launcher (`flatpak run` → this → `main.py`).
-- `python3-deps.json` — **generated**, not committed by default; pinned Python deps.
+- `python3-deps.json` — **committed**; pinned Python deps (everything *except*
+  PySide6, which comes from the base app).
+
+The runtime is `org.kde.Platform//6.8` (Python 3.12) plus the
+`io.qt.PySide.BaseApp//6.8`, which provides PySide6/shiboken6 — `flatpak-pip-generator`
+explicitly refuses to vendor PySide6 and points to this base app.
 
 ## One-time tooling
 
 ```bash
 sudo apt install flatpak flatpak-builder
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+flatpak install --user flathub org.kde.Platform//6.8 org.kde.Sdk//6.8 io.qt.PySide.BaseApp//6.8
 ```
 
-## 1. Generate the pinned Python dependencies
+## 1. Python dependencies (committed)
 
-Flathub builds offline, so every pip dependency (PySide6, pandas, numpy, the
-supabase stack, …) must be vendored as pinned sources:
+`python3-deps.json` is committed, so a normal build needs no generation step. Only
+regenerate it when `requirements.txt` changes — and exclude PySide6, which the base
+app provides:
 
 ```bash
-curl -L -o flatpak-pip-generator \
-  https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/pip/flatpak-pip-generator
-python3 flatpak-pip-generator --requirements-file=../../requirements.txt \
-        --output python3-deps
+curl -L -o flatpak-pip-generator.py \
+  https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/pip/flatpak-pip-generator.py
+grep -v PySide6 ../../requirements.txt > /tmp/reqs.txt
+python3 flatpak-pip-generator.py --requirements-file=/tmp/reqs.txt --output python3-deps
 ```
 
-This writes `python3-deps.json`, referenced by the manifest. Regenerate it whenever
-`requirements.txt` changes. PySide6 is large and occasionally needs `--ignore-pkg`
-tweaks — expect to iterate here on the first run.
+Run it with **Python 3.12** (matching `org.kde.Platform//6.8`) so the pinned wheels
+are the right ABI.
 
 ## 2. ffmpeg (already pinned)
 
