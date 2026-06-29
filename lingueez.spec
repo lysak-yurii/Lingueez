@@ -71,9 +71,14 @@ hiddenimports += collect_submodules("locales")
 # The X11 global-hotkey agent (app/system/hotkey_agent.py) is never imported —
 # it's launched as a subprocess — so analysis misses it and pynput. Frozen builds
 # re-invoke themselves with --hotkey-agent, which imports it, so bundle both.
+# pynput picks its backend dynamically (importlib of pynput.keyboard._xorg), which
+# static analysis can't follow, so collect every pynput submodule and its Xlib
+# dependency or the agent dies with "No module named 'pynput.keyboard._xorg'".
 # Linux-only: Windows drives the hotkey in-process via the `keyboard` lib.
 if sys.platform != "win32":
     hiddenimports += ["app.system.hotkey_agent"]
+    hiddenimports += collect_submodules("pynput")
+    hiddenimports += collect_submodules("Xlib")
 
 icon = os.path.join("assets", "icons",
                     "icon.ico" if sys.platform == "win32" else "icon.png")

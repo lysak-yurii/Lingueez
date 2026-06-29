@@ -37,6 +37,8 @@ dist/
 build/
 installer_output/
 ffmpeg/
+# AM/AppMan installer script — downloaded locally for testing, not part of the repo
+AM-INSTALLER
 
 # PyInstaller
 *.spec

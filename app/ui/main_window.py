@@ -1596,6 +1596,8 @@ class MainWindow(QMainWindow):
         self._hotkey_proc = None
         self._hotkey_handle = None
         self._active_hotkey = None
+        self._hotkey_started_at = 0.0      # monotonic clock when the agent last started
+        self._hotkey_fast_failures = 0     # consecutive die-on-startup count (capped)
         self._ipc_server = None
         self._gsettings_active = False     # we own a GNOME custom keybinding
         self._wayland_warned = False
@@ -1790,6 +1792,10 @@ class MainWindow(QMainWindow):
             action.setText(f"{tr('Add Word')} ({hotkey})" if hotkey else tr("Add Word"))
 
     def _stop_hotkey_agent(self):
+        # A deliberate stop (reconfigure / teardown) clears the fast-failure count so
+        # the next start gets a fresh set of retries; death-triggered restarts go
+        # straight through _start_hotkey_agent and keep accumulating.
+        self._hotkey_fast_failures = 0
         proc = self._hotkey_proc
         if proc is None:
             return
@@ -1820,6 +1826,8 @@ class MainWindow(QMainWindow):
             proc.setArguments([agent, hotkey])
         proc.readyReadStandardOutput.connect(self._on_hotkey_agent_output)
         proc.finished.connect(self._on_hotkey_agent_died)
+        import time
+        self._hotkey_started_at = time.monotonic()
         proc.start()
         self._hotkey_proc = proc
 
@@ -1833,6 +1841,24 @@ class MainWindow(QMainWindow):
 
     def _on_hotkey_agent_died(self, *_):
         if self._quitting:
+            return
+        import time
+        # A healthy agent runs until the hotkey is reconfigured or the app quits;
+        # only pynput's occasional X11 record-thread segfault should bounce it, so
+        # we restart. But an agent that dies within seconds never registered (e.g. a
+        # missing backend or no X server) — cap consecutive fast failures so a broken
+        # environment can't spin an endless restart/log loop. A run that survives the
+        # window resets the counter (see also _stop_hotkey_agent on reconfigure).
+        if time.monotonic() - self._hotkey_started_at < 5:
+            self._hotkey_fast_failures += 1
+        else:
+            self._hotkey_fast_failures = 0
+        if self._hotkey_fast_failures >= 3:
+            logging.error("Hotkey agent keeps exiting immediately — giving up; the "
+                          "global Add-Word hotkey is disabled for this session.")
+            show_toast(self, tr("Add Word hotkey"),
+                       tr("The global hotkey could not start on this system."),
+                       "warning")
             return
         logging.warning("Hotkey agent exited — restarting in 2s")
         QTimer.singleShot(2000, lambda: not self._quitting and self._start_hotkey_agent())
