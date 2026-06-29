@@ -39,6 +39,8 @@ installer_output/
 ffmpeg/
 # AM/AppMan installer script — downloaded locally for testing, not part of the repo
 AM-INSTALLER
+# Downloaded Python wheels (e.g. from `pip download`)
+*.whl
 
 # PyInstaller
 *.spec

@@ -71,14 +71,23 @@ hiddenimports += collect_submodules("locales")
 # The X11 global-hotkey agent (app/system/hotkey_agent.py) is never imported —
 # it's launched as a subprocess — so analysis misses it and pynput. Frozen builds
 # re-invoke themselves with --hotkey-agent, which imports it, so bundle both.
-# pynput picks its backend dynamically (importlib of pynput.keyboard._xorg), which
-# static analysis can't follow, so collect every pynput submodule and its Xlib
-# dependency or the agent dies with "No module named 'pynput.keyboard._xorg'".
+# pynput's X11 backend (pynput.keyboard._xorg) connects to an X server at import
+# time, so collect_submodules can only enumerate it when a display exists; on a
+# headless builder it silently returns nothing and the hotkey ships dead. Build
+# under a virtual display (CI runs PyInstaller via `xvfb-run`) and hard-fail here
+# if the backend is missing, rather than shipping a broken AppImage.
 # Linux-only: Windows drives the hotkey in-process via the `keyboard` lib.
 if sys.platform != "win32":
+    _pynput_mods = collect_submodules("pynput")
     hiddenimports += ["app.system.hotkey_agent"]
-    hiddenimports += collect_submodules("pynput")
+    hiddenimports += _pynput_mods
     hiddenimports += collect_submodules("Xlib")
+    if not any(m.endswith("keyboard._xorg") for m in _pynput_mods):
+        raise SystemExit(
+            "lingueez.spec: pynput X11 backend (_xorg) was not collected — the "
+            "global hotkey would be dead. Run PyInstaller under a display, e.g. "
+            "`xvfb-run -a pyinstaller lingueez.spec`."
+        )
 
 icon = os.path.join("assets", "icons",
                     "icon.ico" if sys.platform == "win32" else "icon.png")

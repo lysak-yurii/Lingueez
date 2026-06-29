@@ -115,8 +115,14 @@ jobs:
           cp "$DIR/bin/ffmpeg" ffmpeg/bin/ffmpeg
           cp "$DIR/bin/ffprobe" ffmpeg/bin/ffprobe
           chmod +x ffmpeg/bin/ffmpeg ffmpeg/bin/ffprobe
+      - name: Install Xvfb
+        # pynput's X11 backend (pynput.keyboard._xorg) connects to an X server at
+        # import time, so PyInstaller can only collect it when a display exists.
+        # On the headless runner the collection silently yields nothing and the
+        # global hotkey ends up dead — so build under a virtual display.
+        run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Build
-        run: pyinstaller lingueez.spec
+        run: xvfb-run -a pyinstaller lingueez.spec
       - name: Assemble AppDir
         run: |
           APPDIR=AppDir
