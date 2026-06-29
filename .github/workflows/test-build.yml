@@ -1,12 +1,15 @@
 name: Test build (all platforms)
 
-# Manual only: builds the Windows installer, the Linux AppImage, and the Flatpak
-# bundle as downloadable ARTIFACTS so all three can be tested before a real release.
-# This is NOT a release — nothing is published and no tag is needed (release.yml
-# stays tag-only and untouched). Trigger it from the Actions tab ("Run workflow")
-# on whichever branch you want to test. Mirrors release.yml's build jobs; if those
-# change, update them here too.
+# Builds the Windows installer, the Linux AppImage, and the Flatpak bundle as
+# downloadable ARTIFACTS so all three can be tested before a real release. This is
+# NOT a release — nothing is published and no tag is needed (release.yml stays
+# tag-only and untouched). Auto-runs on pushes to the flatpak-support branch while
+# we iterate. (When merging to main, switch this to `workflow_dispatch:` only — the
+# manual "Run workflow" button works once the file is on the default branch.)
+# Mirrors release.yml's build jobs; if those change, update them here too.
 on:
+  push:
+    branches: [flatpak-support]
   workflow_dispatch:
 
 jobs:
