@@ -1804,11 +1804,20 @@ class MainWindow(QMainWindow):
 
     def _start_hotkey_agent(self):
         from PySide6.QtCore import QProcess
-        agent = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "system", "hotkey_agent.py")
+        hotkey = _hotkey_to_pynput(self._active_hotkey or DEFAULT_HOTKEY)
         proc = QProcess(self)
         proc.setProgram(sys.executable)
-        proc.setArguments([agent, _hotkey_to_pynput(self._active_hotkey or DEFAULT_HOTKEY)])
+        if getattr(sys, "frozen", False):
+            # Frozen: sys.executable is the app binary, not python, so it can't run
+            # hotkey_agent.py as a script — it would ignore the path and relaunch the
+            # whole app, which fails the single-instance lock and spawns an endless
+            # "already running" popup loop. Re-invoke ourselves with a flag main()
+            # dispatches to the in-bundle agent entry point instead.
+            proc.setArguments(["--hotkey-agent", hotkey])
+        else:
+            agent = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "system", "hotkey_agent.py")
+            proc.setArguments([agent, hotkey])
         proc.readyReadStandardOutput.connect(self._on_hotkey_agent_output)
         proc.finished.connect(self._on_hotkey_agent_died)
         proc.start()

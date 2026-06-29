@@ -165,6 +165,17 @@ def _setup_logging():
 
 
 def main():
+    if "--hotkey-agent" in sys.argv:
+        # Frozen builds re-invoke this binary as the global-hotkey listener (a
+        # PyInstaller exe is not a Python interpreter, so it can't run the
+        # standalone hotkey_agent.py the dev build launches). Run only the agent
+        # loop here — no QApplication, no single-instance lock, no path/log setup
+        # — so it never trips the "already running" guard or seeds the data dir.
+        from app.system.hotkey_agent import main as agent_main
+        i = sys.argv.index("--hotkey-agent")
+        sys.argv = [sys.argv[0]] + sys.argv[i + 1:i + 2]  # forward the hotkey arg
+        return agent_main()
+
     _setup_paths()
     _setup_logging()
 
