@@ -64,6 +64,8 @@ modules:
           /app/share/metainfo/app.lingueez.Lingueez.metainfo.xml
       - install -Dm644 packaging/flatpak/app.lingueez.Lingueez.png
           /app/share/icons/hicolor/512x512/apps/app.lingueez.Lingueez.png
+      - install -Dm644 LICENSE.txt /app/share/licenses/app.lingueez.Lingueez/LICENSE.txt
+      - install -Dm644 NOTICE /app/share/licenses/app.lingueez.Lingueez/NOTICE
     sources:
       - type: dir
         path: ../..
