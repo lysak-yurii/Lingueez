@@ -1,0 +1,67 @@
+# Flathub submission manifest for Lingueez.
+# Docs: https://docs.flathub.org/docs/for-app-authors/submission
+#
+# IDENTICAL to ../app.lingueez.Lingueez.yml EXCEPT the `lingueez` source: here it's a
+# pinned git tag (reproducible — required by Flathub) instead of `type: dir`. Keep the
+# two in sync if you change runtime/permissions/modules.
+#
+# To submit: in a flathub/flathub fork on a branch named exactly app.lingueez.Lingueez,
+# place THIS file + a copy of ../python3-deps.json at the repo root, fill tag+commit
+# below (git rev-list -n1 <tag>), and open a PR. After merge, verify lingueez.app
+# ownership in the Flathub dashboard.
+id: app.lingueez.Lingueez
+runtime: org.kde.Platform
+runtime-version: '6.9'
+sdk: org.kde.Sdk
+base: io.qt.PySide.BaseApp
+base-version: '6.9'
+command: lingueez
+
+finish-args:
+  # Network: Supabase sync/auth, translation/TTS, RSS, web article fetch.
+  - --share=network
+  # Shared memory — Qt needs it (and for the X11 fallback).
+  - --share=ipc
+  # Display: prefer Wayland, fall back to X11 (also enables the pynput X11 hotkey
+  # agent on X11 sessions).
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Audio (read-aloud playback via pydub/pygame).
+  - --socket=pulseaudio
+  # GPU acceleration for Qt rendering.
+  - --device=dri
+  # System tray (StatusNotifierItem).
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Diagnostics bundle for "Report an issue" is written to Downloads so the user can
+  # actually find/attach it (the sandbox /tmp is private and invisible).
+  - --filesystem=xdg-download
+
+modules:
+  # Offline-vendored Python deps (everything except PySide6, which the base app
+  # provides). Copy ../python3-deps.json next to this manifest in the Flathub repo.
+  - python3-deps.json
+
+  # ffmpeg is NOT bundled — org.kde.Platform ships /usr/bin/ffmpeg 7.x (mp3 decode +
+  # libmp3lame encode), which pydub finds on PATH.
+
+  # The app itself, from a pinned release tag.
+  - name: lingueez
+    buildsystem: simple
+    build-commands:
+      - install -d /app/lingueez
+      - cp -r app locales main.py /app/lingueez/
+      - cp -r assets /app/lingueez/assets
+      - install -Dm755 packaging/flatpak/lingueez.sh /app/bin/lingueez
+      - install -Dm644 packaging/flatpak/app.lingueez.Lingueez.desktop
+          /app/share/applications/app.lingueez.Lingueez.desktop
+      - install -Dm644 packaging/flatpak/app.lingueez.Lingueez.metainfo.xml
+          /app/share/metainfo/app.lingueez.Lingueez.metainfo.xml
+      - install -Dm644 packaging/flatpak/app.lingueez.Lingueez.png
+          /app/share/icons/hicolor/512x512/apps/app.lingueez.Lingueez.png
+    sources:
+      - type: git
+        url: https://github.com/lysak-yurii/lingueez.git
+        # Fill BOTH from your release tag (Flathub requires the exact commit):
+        #   git rev-list -n1 v2.0.3
+        tag: v2.0.3
+        commit: REPLACE_WITH_FULL_40_CHAR_COMMIT_SHA

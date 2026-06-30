@@ -41,6 +41,8 @@ ffmpeg/
 AM-INSTALLER
 # Downloaded Python wheels (e.g. from `pip download`)
 *.whl
+# Local Flathub-submission notes (kept on disk, not tracked)
+packaging/flatpak/flathub/README.md
 
 # PyInstaller
 *.spec

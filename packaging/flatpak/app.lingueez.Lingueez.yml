@@ -1,9 +1,6 @@
-# Flatpak manifest for Lingueez (build-from-source, Flathub-style).
-#
-# This is an initial scaffold: the Python dependencies are vendored into
-# python3-deps.json (generated, see packaging/flatpak/README.md) and the ffmpeg
-# checksum must be pinned. The first branch CI build will surface what needs
-# tuning — treat the deps/ffmpeg modules as the iteration points.
+# Flatpak manifest for Lingueez (build-from-source). Used by the CI test-build and
+# release builds; it builds from the local checkout (`type: dir`). The Flathub
+# submission uses the git-tag variant in flathub/app.lingueez.Lingueez.yml.
 id: app.lingueez.Lingueez
 runtime: org.kde.Platform
 runtime-version: '6.9'
