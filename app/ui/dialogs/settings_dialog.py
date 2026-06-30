@@ -849,19 +849,20 @@ class SettingsDialog(FramelessDialog):
             self.hotkey_edit.setEnabled(False)
             # Compose from small pieces so the options read as independent
             # alternatives (an explicit "any one of these" + a bulleted list),
-            # not as a run-on list of prerequisites.
-            options = [
-                tr("Log in to an X11 session instead of Wayland"),
-                tr("Update to GNOME 48 or newer, or use KDE Plasma"),
-            ]
+            # not as a run-on list of prerequisites. Only list remedies that
+            # actually work today — the GlobalShortcuts portal isn't implemented yet,
+            # so "switch to a portal desktop" is NOT offered.
+            options = [tr("Log in to an X11 session instead of Wayland")]
             if reason == CAP_WAYLAND_SANDBOXED:
-                intro = tr("The global Add-Word hotkey isn't available in the Flatpak "
-                           "sandbox here — this desktop has no global-shortcuts portal.")
+                intro = tr("The global Add-Word hotkey isn't available in the "
+                           "Flatpak sandbox on Wayland.")
                 options.append(
                     tr("Install the AppImage version — it runs outside the sandbox"))
             else:  # CAP_WAYLAND_NO_PORTAL
-                intro = tr("The global Add-Word hotkey isn't available here — this "
-                           "Wayland desktop has no global-shortcuts portal.")
+                intro = tr("The global Add-Word hotkey isn't supported on this "
+                           "Wayland desktop yet.")
+                options.append(
+                    tr("Use a GNOME session — the global hotkey works there"))
             why = (intro + "\n\n" + tr("To enable it, use any one of these:") + "\n"
                    + "\n".join(f"   •  {opt}" for opt in options))
             warn = QLabel(why)

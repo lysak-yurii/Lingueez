@@ -886,21 +886,21 @@ TRANSLATIONS: dict[str, str] = {
         "Глобальна гаряча клавіша «Додати слово» недоступна в цьому "
         "середовищі. Перегляньте параметри в розділі «Система»."
     ),
-    "The global Add-Word hotkey isn't available in the Flatpak "
-    "sandbox here — this desktop has no global-shortcuts portal.": (
+    "The global Add-Word hotkey isn't available in the "
+    "Flatpak sandbox on Wayland.": (
         "Глобальна гаряча клавіша «Додати слово» недоступна в пісочниці "
-        "Flatpak — на цьому середовищі немає порталу глобальних скорочень."
+        "Flatpak у середовищі Wayland."
     ),
-    "The global Add-Word hotkey isn't available here — this "
-    "Wayland desktop has no global-shortcuts portal.": (
-        "Глобальна гаряча клавіша «Додати слово» недоступна — на цьому "
-        "середовищі Wayland немає порталу глобальних скорочень."
+    "The global Add-Word hotkey isn't supported on this "
+    "Wayland desktop yet.": (
+        "Глобальна гаряча клавіша «Додати слово» поки що не підтримується "
+        "в цьому середовищі Wayland."
     ),
     "To enable it, use any one of these:": "Щоб увімкнути її, скористайтеся одним зі способів:",
     "Log in to an X11 session instead of Wayland":
         "увійдіть у сеанс X11 замість Wayland",
-    "Update to GNOME 48 or newer, or use KDE Plasma":
-        "оновіть GNOME до версії 48 або новішої (чи скористайтеся KDE Plasma)",
+    "Use a GNOME session — the global hotkey works there":
+        "скористайтеся сеансом GNOME — там глобальна гаряча клавіша працює",
     "Install the AppImage version — it runs outside the sandbox":
         "встановіть версію AppImage — вона працює поза пісочницею",
     "Download the AppImage": "Завантажити AppImage",

@@ -110,10 +110,13 @@ def hotkey_capability():
         return True, CAP_OK
     if not is_wayland():
         return True, CAP_OK                      # X11: pynput agent
-    if global_shortcuts_portal_available():
-        return True, CAP_OK                      # GNOME 48+/KDE: portal
+    # NOTE: the GlobalShortcuts portal would serve GNOME 48+/KDE here, but
+    # _apply_portal_hotkey (main_window) is still a stub. Until it's implemented we
+    # must NOT report the portal as a working mechanism — otherwise portal-capable
+    # desktops (e.g. KDE Plasma Wayland) would claim the hotkey works when it can't
+    # register. Re-add a global_shortcuts_portal_available() check once that lands.
     if is_flatpak():
         return False, CAP_WAYLAND_SANDBOXED      # sandbox can't reach host gsettings
     if desktop_is_gnome():
         return True, CAP_OK                      # native/AppImage: gsettings keybinding
-    return False, CAP_WAYLAND_NO_PORTAL
+    return False, CAP_WAYLAND_NO_PORTAL          # non-GNOME Wayland: no usable path
