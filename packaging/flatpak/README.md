@@ -11,8 +11,8 @@ Flathub. It builds the app **from source** (the Flathub-preferred way).
 - `lingueez.sh` — in-sandbox launcher (`flatpak run` → this → `main.py`).
 - `python3-deps.json` — **committed**, offline-vendored Python deps (pinned wheels).
 
-The runtime is `org.kde.Platform//6.9` (Python 3.12) plus the
-`io.qt.PySide.BaseApp//6.9`, which provides PySide6/shiboken6 — `flatpak-pip-generator`
+The runtime is `org.kde.Platform//6.10` (Python 3.13) plus the
+`io.qt.PySide.BaseApp//6.10`, which provides PySide6/shiboken6 — `flatpak-pip-generator`
 explicitly refuses to vendor PySide6 and points to this base app.
 
 ## One-time tooling
@@ -20,17 +20,18 @@ explicitly refuses to vendor PySide6 and points to this base app.
 ```bash
 sudo apt install flatpak flatpak-builder
 flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user flathub org.kde.Platform//6.9 org.kde.Sdk//6.9 io.qt.PySide.BaseApp//6.9
+flatpak install --user flathub org.kde.Platform//6.10 org.kde.Sdk//6.10 io.qt.PySide.BaseApp//6.10
 ```
 
 ## 1. Python dependencies (offline-vendored — Flathub-compliant)
 
 `python3-deps.json` pins every dep (except PySide6) as an **offline source**, so the
 build needs no network. Native/Rust packages (numpy, pandas, grpcio, jiter,
-pydantic-core, cryptography, …) are pinned as prebuilt **cp312 manylinux wheels**;
-only `evdev` (plain C) and `sgmllib3k` (pure Python) build from sdist. Every install
-command carries `--ignore-installed` so the pinned numpy overrides the older one the
-base app ships — otherwise pandas segfaults (`pandas.date_range`, Stats page).
+pydantic-core, …) are pinned as prebuilt **cp313 manylinux wheels** (`cryptography` is
+`cp311-abi3` — stable-ABI, so 3.13-compatible) to match the runtime's Python 3.13; only
+`sgmllib3k` (pure Python) builds from sdist. Every install command carries
+`--ignore-installed` so the pinned numpy overrides the older one the base app ships —
+otherwise pandas segfaults (`pandas.date_range`, Stats page).
 
 To regenerate after a `requirements.txt` change:
 
@@ -42,8 +43,8 @@ python3 flatpak-pip-generator.py --requirements-file=/tmp/reqs.txt --output pyth
 ```
 
 That defaults to sdists for native packages; convert each native/Rust sdist to its
-cp312 (or abi3) x86_64 manylinux wheel from PyPI, and add `--ignore-installed` to
-every install command. (Alternatively, generate with `--runtime=org.kde.Platform//6.9
+cp313 (or abi3) x86_64 manylinux wheel from PyPI, and add `--ignore-installed` to
+every install command. (Alternatively, generate with `--runtime=org.kde.Platform//6.10
 --artifact-policy=platform`, which selects platform wheels directly but needs flatpak
 + the runtime installed locally.) x86_64 only for now — add aarch64 wheels for a
 multi-arch Flathub build.
@@ -76,8 +77,8 @@ AppImage artifacts) on the `flatpak-support` branch.
 
 - **Global hotkey on Wayland** needs the GlobalShortcuts portal (GNOME 48+/KDE); on
   pre-48 GNOME the app shows a graceful in-app notice (see `app/system/hotkey_env.py`).
-- **Runtime**: on `org.kde.Platform//6.9` (Python 3.12, non-EOL). 6.10 moved to
-  Python 3.13, which would need `python3-deps.json` regenerated for cp313.
+- **Runtime**: on `org.kde.Platform//6.10` (Python 3.13, latest). `python3-deps.json`
+  is pinned to cp313 wheels to match; regenerate if the runtime's Python version bumps.
 - **metainfo**: replace the placeholder screenshot URL with a real one and validate.
 - For the actual **Flathub submission**, point the `lingueez` module's source at a
   tagged release archive instead of `type: dir`, and open a PR to `flathub/flathub`.

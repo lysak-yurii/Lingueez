@@ -3,14 +3,14 @@
 # submission uses the git-tag variant in flathub/app.lingueez.Lingueez.yml.
 id: app.lingueez.Lingueez
 runtime: org.kde.Platform
-runtime-version: '6.9'
+runtime-version: '6.10'
 sdk: org.kde.Sdk
 # PySide6/shiboken6 can't be pip-vendored (flatpak-pip-generator refuses and points
-# here); they come from the PySide base app, which rides on org.kde.Platform//6.9.
-# 6.9 keeps Python 3.12 (matching the pinned cp312 wheels); 6.10 moved to 3.13, which
-# would require regenerating python3-deps.json for cp313.
+# here); they come from the PySide base app, which rides on org.kde.Platform//6.10.
+# 6.10 ships Python 3.13, so python3-deps.json pins cp313 wheels (regenerate for the
+# matching cpXY if the runtime's Python version changes again).
 base: io.qt.PySide.BaseApp
-base-version: '6.9'
+base-version: '6.10'
 command: lingueez
 
 finish-args:
@@ -37,9 +37,10 @@ finish-args:
 modules:
   # 1) Python dependencies (everything except PySide6, which the base app provides).
   #    Offline-vendored, pinned sources — Flathub-compliant (no build-time network).
-  #    Native/Rust packages (numpy, pandas, grpcio, jiter, pydantic-core, cryptography,
-  #    …) are pinned as prebuilt cp312 wheels; only evdev (C) and sgmllib3k (pure
-  #    Python) build from sdist. The install commands carry --ignore-installed so the
+  #    Native/Rust packages (numpy, pandas, grpcio, jiter, pydantic-core, …) are pinned
+  #    as prebuilt cp313 wheels (cryptography: cp311-abi3, stable-ABI so 3.13-compatible)
+  #    to match org.kde.Platform//6.10's Python 3.13; only sgmllib3k (pure Python) builds
+  #    from sdist. The install commands carry --ignore-installed so the
   #    pinned numpy overrides the older one the base app ships — otherwise pandas
   #    segfaults (pandas.date_range on the Stats page). Regenerate when
   #    requirements.txt changes (see packaging/flatpak/README.md).
