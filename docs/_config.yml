@@ -9,6 +9,11 @@ defaults:
     values:
       layout: legal
 
+# Jekyll skips dot-folders by default; force it to publish the Flathub domain-
+# verification file at /.well-known/org.flathub.VerifiedApps.txt.
+include:
+  - .well-known
+
 # Keep the internal GDPR runbooks and the maintainer README off the public site.
 exclude:
   - legal/gdpr
