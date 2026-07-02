@@ -42,7 +42,7 @@ import threading
 from datetime import datetime
 
 from PySide6.QtCore import (
-    QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal,
+    QEasingCurve, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal,
 )
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
@@ -55,7 +55,7 @@ from app.core import db as dbq
 from app.core import srs
 from app.i18n import tr
 from app.ui import icons
-from app.ui.animations import fade_swap, flip_swap
+from app.ui.animations import AnimatedStackedWidget, fade_swap, flip_swap
 from app.ui.workers import run_in_thread
 
 DECK_KINDS = ("due", "filtered", "newest", "selected")
@@ -127,7 +127,12 @@ class _DeckLogo(QWidget):
         self.update()
 
     def _set_sway(self, v):
-        self._sway = float(v)
+        v = float(v)
+        # The full sway is only ±1.6°, so per-tick deltas are invisible —
+        # skip repaints below ~0.03° to keep the idle loop nearly free.
+        if abs(v - self._sway) < 0.02:
+            return
+        self._sway = v
         self.update()
 
     def replay(self):
@@ -701,11 +706,24 @@ class FlashcardsPage(QWidget):
     # -------------------------------------------------------------- deck
 
     def on_shown(self):
-        """Called by the main window whenever the page becomes current."""
+        """Called by the main window whenever the page becomes current.
+
+        The page slides in behind a snapshot overlay; anything that repaints
+        or blocks here fights that animation for frames. Only the cheap chip
+        state is refreshed synchronously (so the grabbed frame looks right) —
+        the due-count query and the logo intro wait until the slide lands.
+        """
         if self._stack.currentIndex() == self.STATE_PICKER:
-            self._refresh_picker()
-            self.logo.replay()
+            self._refresh_picker_chips()
+            QTimer.singleShot(AnimatedStackedWidget.DURATION + 40,
+                              self._on_shown_settled)
         self.setFocus(Qt.OtherFocusReason)
+
+    def _on_shown_settled(self):
+        if not self.isVisible() or self._stack.currentIndex() != self.STATE_PICKER:
+            return  # user already navigated away or started a session
+        self._refresh_picker_info()
+        self.logo.replay()
 
     def _checked_deck_kind(self):
         for kind, chip in self._deck_chips.items():
@@ -714,14 +732,22 @@ class FlashcardsPage(QWidget):
         return "due"
 
     def _refresh_picker(self):
+        self._refresh_picker_chips()
+        self._refresh_picker_info()
+
+    def _refresh_picker_chips(self):
         has_selection = bool(self._fetch_deck("selected", 1))
         chip = self._deck_chips["selected"]
+        # Re-checking a chip fires buttonToggled → _refresh_picker_info (a DB
+        # query); callers decide when to refresh the info label, so keep this
+        # a pure chip-state update.
+        self._deck_group.blockSignals(True)
         chip.setEnabled(has_selection)
         if has_selection:
             chip.setChecked(True)
         elif chip.isChecked():
             self._deck_chips["due"].setChecked(True)
-        self._refresh_picker_info()
+        self._deck_group.blockSignals(False)
 
     def _refresh_picker_info(self):
         kind = self._checked_deck_kind()
