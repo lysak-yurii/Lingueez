@@ -1574,6 +1574,11 @@ TRANSLATIONS: dict[str, str] = {
     "Auto-pronounce": "Автоозвучення",
     "Speak each card as it appears and when it flips":
         "Озвучувати кожну картку, коли вона з'являється та перевертається",
+    "Deck preview": "Огляд колоди",
+    "{n} cards": "Карток: {n}",
+    "…and {n} more": "…і ще {n}",
+    "Due": "Пора повторити",
+    "In {n} d": "Через {n} д",
 }
 
 # Date names, read by app.i18n. Months are in the genitive case because they

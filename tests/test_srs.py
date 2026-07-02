@@ -179,6 +179,16 @@ class SrsStorageTests(unittest.TestCase):
     def test_get_missing_returns_none(self):
         self.assertIsNone(db.srs_get("nope", db_path=self.db_path))
 
+    def test_get_many_returns_only_graded_rows(self):
+        graded = self._add_word()
+        ungraded = self._add_word()
+        db.srs_upsert(graded, srs.apply_grade(None, "good", NOW), db_path=self.db_path)
+
+        rows = db.srs_get_many([graded, ungraded, "missing"], db_path=self.db_path)
+        self.assertEqual(set(rows), {graded})
+        self.assertEqual(rows[graded]["review_count"], 1)
+        self.assertEqual(db.srs_get_many([], db_path=self.db_path), {})
+
     def test_upsert_roundtrip_and_update(self):
         wid = self._add_word()
         first = srs.apply_grade(None, "good", NOW)
@@ -237,6 +247,45 @@ class SrsStorageTests(unittest.TestCase):
             2, now_iso=NOW.isoformat(timespec="seconds"), db_path=self.db_path
         )
         self.assertEqual(len(ids), 2)
+
+
+class BatchWordFetchTests(unittest.TestCase):
+    """get_words_by_ids powers the flashcards deck-preview grid."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._cwd = os.getcwd()
+        os.chdir(self._tmp.name)
+        self.db_path = os.path.join(self._tmp.name, "words.db")
+        db.initialize_database(self.db_path)
+        from app.core.database_adapter import DatabaseAdapter
+
+        self.adapter = DatabaseAdapter(use_cloud=False)
+        self.adapter.set_local_db(self.db_path)
+
+    def tearDown(self):
+        os.chdir(self._cwd)
+        self._tmp.cleanup()
+
+    def test_returns_rows_in_input_order(self):
+        import sqlite3
+
+        ids = []
+        conn = sqlite3.connect(self.db_path)
+        for w1 in ("alpha", "beta", "gamma"):
+            wid = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO words (ID, Word1, Word2, Definition) VALUES (?, ?, ?, ?)",
+                (wid, w1, w1.upper(), f"def {w1}"),
+            )
+            ids.append(wid)
+        conn.commit()
+        conn.close()
+
+        rows = self.adapter.get_words_by_ids([ids[2], ids[0], "missing"])
+        self.assertEqual([r["Word1"] for r in rows], ["gamma", "alpha"])
+        self.assertEqual(rows[1]["Definition"], "def alpha")
+        self.assertEqual(self.adapter.get_words_by_ids([]), [])
 
 
 if __name__ == "__main__":

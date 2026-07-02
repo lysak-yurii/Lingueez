@@ -845,7 +845,32 @@ class DatabaseAdapter:
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else None
-    
+
+    def get_words_by_ids(self, ids) -> List[Dict[str, Any]]:
+        """Get several words in one query, preserving the input ID order.
+
+        Local-only fast path for read-heavy UI (e.g. the flashcards deck
+        preview); missing IDs are silently skipped."""
+        ids = [str(i) for i in ids]
+        if not ids or not os.path.exists(self.local_db):
+            return []
+        found: Dict[str, Dict[str, Any]] = {}
+        try:
+            conn = sqlite3.connect(self.local_db)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            # SQLite caps host parameters (999 in older builds) — chunk the IN list
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                marks = ",".join("?" * len(chunk))
+                cursor.execute(f"SELECT * FROM words WHERE ID IN ({marks})", chunk)
+                for row in cursor.fetchall():
+                    found[str(row["ID"])] = dict(row)
+            conn.close()
+        except (sqlite3.OperationalError, FileNotFoundError):
+            return []
+        return [found[i] for i in ids if i in found]
+
     def insert_word(self, word_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Insert a word. Writes to both local and cloud if available."""
         # Always write to local first

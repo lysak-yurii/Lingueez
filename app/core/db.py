@@ -653,6 +653,30 @@ def srs_get(word_id, db_path=None):
     return dict(row) if row else None
 
 
+def srs_get_many(word_ids, db_path=None):
+    """SM-2 scheduling rows for several words as ``{word_id: row_dict}``.
+
+    Words that were never graded simply have no entry."""
+    word_ids = [str(w) for w in word_ids]
+    if not word_ids:
+        return {}
+    db_path = db_path or get_active_db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    rows = {}
+    # SQLite caps host parameters (999 in older builds) — chunk the IN list
+    for start in range(0, len(word_ids), 500):
+        chunk = word_ids[start:start + 500]
+        marks = ','.join('?' * len(chunk))
+        cursor.execute(
+            f'SELECT * FROM srs_progress WHERE word_id IN ({marks})', chunk)
+        for row in cursor.fetchall():
+            rows[row['word_id']] = dict(row)
+    conn.close()
+    return rows
+
+
 def srs_upsert(word_id, fields, db_path=None):
     """Insert or replace a word's SM-2 scheduling state.
 

@@ -42,12 +42,13 @@ import threading
 from datetime import datetime
 
 from PySide6.QtCore import (
-    QEasingCurve, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal,
+    QEasingCurve, QPointF, QRect, QRectF, QSize, Qt, QTimer,
+    QVariantAnimation, Signal,
 )
 from PySide6.QtGui import QColor, QFont, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-    QSizePolicy, QSpinBox, QStackedLayout, QVBoxLayout, QWidget,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel, QLayout, QPushButton,
+    QScrollArea, QSizePolicy, QSpinBox, QStackedLayout, QVBoxLayout, QWidget,
 )
 
 from app.core import audio
@@ -56,6 +57,7 @@ from app.core import srs
 from app.i18n import tr
 from app.ui import icons
 from app.ui.animations import AnimatedStackedWidget, fade_swap, flip_swap
+from app.ui.charts import FlowLayout, status_color_key
 from app.ui.workers import run_in_thread
 
 DECK_KINDS = ("due", "filtered", "newest", "selected")
@@ -69,12 +71,16 @@ def _soft(color_hex, alpha=36):
 
 
 class _Panel(QWidget):
-    """Rounded surface container for the picker / completion states."""
+    """Rounded surface container for the picker bar / completion state.
 
-    def __init__(self, colors, parent=None):
+    `max_width` caps centered panels (completion); pass None for a
+    full-width bar."""
+
+    def __init__(self, colors, max_width=560, parent=None):
         super().__init__(parent)
         self._colors = colors
-        self.setMaximumWidth(560)
+        if max_width:
+            self.setMaximumWidth(max_width)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def refresh_theme(self, colors):
@@ -99,12 +105,13 @@ class _DeckLogo(QWidget):
     distracting.
     """
 
-    def __init__(self, colors, parent=None):
+    def __init__(self, colors, scale=1.0, parent=None):
         super().__init__(parent)
         self._colors = colors
+        self._scale = float(scale)
         self._spread = 1.0   # 0 = stacked, 1 = fanned open
         self._sway = 0.0     # ±1 slow idle drift
-        self.setFixedSize(150, 104)
+        self.setFixedSize(int(150 * self._scale), int(104 * self._scale))
 
         self._intro = QVariantAnimation(self)
         self._intro.setDuration(700)
@@ -155,10 +162,11 @@ class _DeckLogo(QWidget):
 
     def paintEvent(self, _event):  # noqa: N802
         c = self._colors
+        s = self._scale
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        pivot = QPointF(self.width() / 2, self.height() - 4)
-        card_w, card_h = 54, 74
+        pivot = QPointF(self.width() / 2, self.height() - 4 * s)
+        card_w, card_h = 54 * s, 74 * s
         sway = self._sway * 1.6  # degrees
         accent = QColor(c["accent"])
         # back → front so the front card overlaps
@@ -172,7 +180,7 @@ class _DeckLogo(QWidget):
             p.save()
             p.translate(pivot)
             p.rotate(angle * self._spread + sway)
-            rect = QRectF(-card_w / 2, -card_h - 8, card_w, card_h)
+            rect = QRectF(-card_w / 2, -card_h - 8 * s, card_w, card_h)
             p.setPen(QPen(border, 1.2))
             if fill is accent:
                 soft = QColor(accent)
@@ -180,10 +188,10 @@ class _DeckLogo(QWidget):
                 p.setBrush(soft)
             else:
                 p.setBrush(fill)
-            p.drawRoundedRect(rect, 8, 8)
+            p.drawRoundedRect(rect, 8 * s, 8 * s)
             if glyph:
                 f = QFont()
-                f.setPointSizeF(17)
+                f.setPointSizeF(17 * s)
                 f.setWeight(QFont.Bold)
                 p.setFont(f)
                 p.setPen(glyph_color)
@@ -227,6 +235,179 @@ class _SlimBar(QWidget):
             p.setBrush(QColor(self._colors["accent"]))
             p.drawRoundedRect(QRectF(r.left(), r.top(), w, r.height()),
                               radius, radius)
+        p.end()
+
+
+def _snippet(text, limit=110):
+    """Collapse whitespace and cap the definition preview length."""
+    text = " ".join(str(text or "").split())
+    if len(text) > limit:
+        text = text[:limit - 1].rstrip() + "…"
+    return text
+
+
+class _CardGridLayout(QLayout):
+    """Responsive uniform grid: as many equal-width columns as fit the
+    minimum item width, with items stretched to consume the full row —
+    CSS's `auto-fill` + `1fr`, so no dead gutter ever appears on the right."""
+
+    def __init__(self, parent=None, min_item_width=250, h_spacing=14,
+                 v_spacing=14, margin=2):
+        super().__init__(parent)
+        self.setContentsMargins(margin, margin, margin, margin)
+        self._min_w = min_item_width
+        self._h = h_spacing
+        self._v = v_spacing
+        self._items = []
+
+    def addItem(self, item):  # noqa: N802
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):  # noqa: N802
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):  # noqa: N802
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):  # noqa: N802
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):  # noqa: N802
+        return True
+
+    def heightForWidth(self, width):  # noqa: N802
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):  # noqa: N802
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):  # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self):  # noqa: N802
+        m = self.contentsMargins()
+        h = max((i.sizeHint().height() for i in self._items), default=0)
+        return QSize(self._min_w + m.left() + m.right(),
+                     h + m.top() + m.bottom())
+
+    def _do_layout(self, rect, test_only):
+        m = self.contentsMargins()
+        eff = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        width = eff.width()
+        cols = max(1, (width + self._h) // (self._min_w + self._h))
+        item_w = (width - (cols - 1) * self._h) // cols
+        last_w = width - (cols - 1) * (item_w + self._h)  # absorbs rounding
+        x, y, col, row_h = eff.x(), eff.y(), 0, 0
+        for item in self._items:
+            w = last_w if col == cols - 1 else item_w
+            h = item.sizeHint().height()
+            if not test_only:
+                item.setGeometry(QRect(x, y, w, h))
+            row_h = max(row_h, h)
+            col += 1
+            if col == cols:
+                x, col = eff.x(), 0
+                y += row_h + self._v
+                row_h = 0
+            else:
+                x += w + self._h
+        bottom = y + row_h if col else y - self._v
+        return bottom - rect.y() + m.bottom()
+
+
+class _PreviewCard(QWidget):
+    """Compact deck-preview tile: word, translation, definition snippet, the
+    word's status and its SM-2 due badge — plus a speaker button to hear the
+    word without starting a session."""
+
+    HEIGHT = 138  # width comes from the responsive grid columns
+
+    def __init__(self, record, definition, due_text, due_key, colors,
+                 speak_cb, parent=None):
+        super().__init__(parent)
+        self._record = record
+        self._colors = colors
+        self._due_key = due_key
+        self.setFixedHeight(self.HEIGHT)
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(16, 12, 16, 12)
+        v.setSpacing(3)
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        self.word = QLabel(str(record.get("Word1") or ""))
+        self.speak_btn = QPushButton(objectName="iconButton")
+        self.speak_btn.setCursor(Qt.PointingHandCursor)
+        self.speak_btn.setFocusPolicy(Qt.NoFocus)
+        self.speak_btn.setIconSize(QSize(14, 14))
+        self.speak_btn.setToolTip(tr("Pronounce"))
+        self.speak_btn.clicked.connect(lambda: speak_cb(self._record))
+        head.addWidget(self.word, 1)
+        head.addWidget(self.speak_btn)
+        v.addLayout(head)
+        self.translation = QLabel(str(record.get("Word2") or ""))
+        v.addWidget(self.translation)
+        self.body = QLabel(_snippet(definition))
+        self.body.setWordWrap(True)
+        self.body.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        v.addWidget(self.body, 1)
+        foot = QHBoxLayout()
+        foot.setSpacing(6)
+        self.status = QLabel()
+        self.status.setTextFormat(Qt.RichText)
+        self.due = QLabel(due_text)
+        foot.addWidget(self.status)
+        foot.addStretch(1)
+        foot.addWidget(self.due)
+        v.addLayout(foot)
+        self._apply_styles()
+
+    def refresh_theme(self, colors):
+        self._colors = colors
+        self._apply_styles()
+        self.update()
+
+    def _apply_styles(self):
+        c = self._colors
+        self.word.setStyleSheet(
+            f"color:{c['text']};background:transparent;"
+            "font-size:11.5pt;font-weight:700;")
+        self.translation.setStyleSheet(
+            f"color:{c['accent_text']};background:transparent;font-size:10pt;")
+        self.body.setStyleSheet(
+            f"color:{c['text_dim']};background:transparent;font-size:8.5pt;")
+        status = str(self._record.get("Status") or "").strip()
+        if status:
+            dot = c.get(status_color_key(status, 0), c["text_dim"])
+            self.status.setText(
+                f'<span style="color:{dot};">●</span> '
+                f'<span style="color:{c["text_dim"]};">{tr(status)}</span>')
+        self.status.setVisible(bool(status))
+        self.status.setStyleSheet("background:transparent;font-size:8.5pt;")
+        tint = {"due": c["warning"], "new": c["accent_text"]}.get(
+            self._due_key, c["text_dim"])
+        self.due.setStyleSheet(
+            f"color:{tint};background:{_soft(tint, 26)};padding:2px 8px;"
+            "border-radius:8px;font-size:8pt;font-weight:600;")
+        # a "New" badge next to a "New" status chip is just noise
+        self.due.setVisible(not (self._due_key == "new" and status == "New"))
+        self.speak_btn.setIcon(icons.icon("volume", c["text_dim"], 14))
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setBrush(QColor(self._colors["surface"]))
+        p.setPen(QPen(QColor(self._colors["border"]), 1))
+        p.drawRoundedRect(rect, 12, 12)
         p.end()
 
 
@@ -440,6 +621,15 @@ class FlashcardsPage(QWidget):
         self._autoplay_listened = 0
         self._speak_cancel = None  # threading.Event of the pronunciation in flight
 
+        self._preview_gen = 0       # drops stale async preview results
+        self._preview_cards = []
+        self._preview_more = None
+        self._preview_defs = {}     # word_id → definition, seeds the session cache
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(300)  # debounce chip/size churn
+        self._preview_timer.timeout.connect(self._refresh_preview)
+
         self.setFocusPolicy(Qt.StrongFocus)
         self._build_ui()
         self._bind_shortcuts()
@@ -461,63 +651,71 @@ class FlashcardsPage(QWidget):
         pronounce_on = get_bool(settings, "flashcards_pronounce", True)
 
         # ---- state 0: deck picker ------------------------------------
+        # A full-width setup bar on top (identity + deck controls) with the
+        # live deck preview grid filling everything below. The grid stretches
+        # its cards into equal-width columns, so no window width leaves a
+        # dead gutter.
         picker = QWidget()
-        pw = QVBoxLayout(picker)
-        pw.addStretch(2)
-        panel_row = QHBoxLayout()
-        panel_row.addStretch(1)
-        self.picker_panel = _Panel(self._colors)
-        self.picker_panel.setMaximumWidth(620)
-        pv = QVBoxLayout(self.picker_panel)
-        pv.setContentsMargins(36, 28, 36, 30)
-        pv.setSpacing(8)
-        panel_row.addWidget(self.picker_panel, 4)
-        panel_row.addStretch(1)
+        pk = QVBoxLayout(picker)
+        pk.setContentsMargins(0, 0, 0, 0)
+        pk.setSpacing(12)
 
-        self.logo = _DeckLogo(self._colors)
-        logo_row = QHBoxLayout()
-        logo_row.addStretch(1)
-        logo_row.addWidget(self.logo)
-        logo_row.addStretch(1)
-        pv.addLayout(logo_row)
-        self.picker_title = QLabel(tr("Flashcards"), alignment=Qt.AlignCenter)
-        self.picker_sub = QLabel(tr("Practice your vocabulary"),
-                                 alignment=Qt.AlignCenter)
-        pv.addWidget(self.picker_title)
-        pv.addWidget(self.picker_sub)
-        pv.addSpacing(16)
+        # The bar stacks vertically: identity row, then one wrapping flow with
+        # every control. Height-for-width only propagates reliably straight
+        # down a vertical box — a flow sitting *beside* the identity block
+        # (inside an HBox) under-reports its height and clips rows on narrow
+        # windows.
+        self.picker_panel = _Panel(self._colors, max_width=None)
+        sp = self.picker_panel.sizePolicy()
+        sp.setHeightForWidth(True)  # the controls flow wraps on narrow windows
+        self.picker_panel.setSizePolicy(sp)
+        bar = QVBoxLayout(self.picker_panel)
+        bar.setContentsMargins(24, 14, 24, 16)
+        bar.setSpacing(10)
 
-        # deck source: exclusive chips, two centered rows so long labels
-        # never get squeezed into clipping
+        head = QHBoxLayout()
+        head.setSpacing(14)
+        self.logo = _DeckLogo(self._colors, scale=0.62)
+        head.addWidget(self.logo, 0, Qt.AlignVCenter)
+        id_col = QVBoxLayout()
+        id_col.setSpacing(2)
+        id_col.addStretch(1)
+        self.picker_title = QLabel(tr("Flashcards"))
+        self.picker_sub = QLabel(tr("Practice your vocabulary"))
+        id_col.addWidget(self.picker_title)
+        id_col.addWidget(self.picker_sub)
+        id_col.addStretch(1)
+        head.addLayout(id_col)
+        head.addStretch(1)
+        bar.addLayout(head)
+
+        # every control lives in one wrapping flow — chips, size, toggles,
+        # actions and the info label wrap to new rows instead of clipping
+        flow_host = QWidget()
+        fsp = flow_host.sizePolicy()
+        fsp.setHeightForWidth(True)
+        flow_host.setSizePolicy(fsp)
+        deck_flow = FlowLayout(flow_host, margin=0, h_spacing=8, v_spacing=8)
         self._deck_group = QButtonGroup(self)
         self._deck_group.setExclusive(True)
-        chips_grid = QGridLayout()
-        chips_grid.setHorizontalSpacing(8)
-        chips_grid.setVerticalSpacing(8)
         self._deck_chips = {}
-        for i, (kind, label) in enumerate((("due", tr("Due cards")),
-                                           ("filtered", tr("Current filter")),
-                                           ("newest", tr("Newest")),
-                                           ("selected", tr("Selected words")))):
+        for kind, label in (("due", tr("Due cards")),
+                            ("filtered", tr("Current filter")),
+                            ("newest", tr("Newest")),
+                            ("selected", tr("Selected words"))):
             chip = QPushButton(label, objectName="chipButton")
             chip.setCheckable(True)
             chip.setCursor(Qt.PointingHandCursor)
             self._deck_group.addButton(chip)
             self._deck_chips[kind] = chip
-            chips_grid.addWidget(chip, i // 2, i % 2)
+            deck_flow.addWidget(chip)
         self._deck_chips["due"].setChecked(True)
-        self._deck_group.buttonToggled.connect(
-            lambda _btn, on: on and self._refresh_picker_info())
-        chips_row = QHBoxLayout()
-        chips_row.addStretch(1)
-        chips_row.addLayout(chips_grid)
-        chips_row.addStretch(1)
-        pv.addLayout(chips_row)
-        pv.addSpacing(10)
+        self._deck_group.buttonToggled.connect(self._on_deck_chip_toggled)
 
-        options = QHBoxLayout()
-        options.setSpacing(8)
-        options.addStretch(1)
+        size_widget = QWidget()
+        size_lay = QHBoxLayout(size_widget)
+        size_lay.setContentsMargins(12, 0, 0, 0)
+        size_lay.setSpacing(6)
         self.size_label = QLabel(tr("Deck size"))
         self.size_spin = QSpinBox()
         self.size_spin.setRange(1, 200)
@@ -525,6 +723,11 @@ class FlashcardsPage(QWidget):
         self.size_spin.setMinimumWidth(72)
         self.size_spin.valueChanged.connect(self._persist_deck_prefs)
         self.size_spin.valueChanged.connect(self._refresh_picker_info)
+        self.size_spin.valueChanged.connect(self._schedule_preview_refresh)
+        size_lay.addWidget(self.size_label)
+        size_lay.addWidget(self.size_spin)
+        deck_flow.addWidget(size_widget)
+
         self.shuffle_btn = QPushButton(tr("Shuffle"), objectName="chipButton")
         self.shuffle_btn.setCheckable(True)
         self.shuffle_btn.setChecked(shuffle_on)
@@ -538,18 +741,13 @@ class FlashcardsPage(QWidget):
         self.pronounce_btn.setToolTip(
             tr("Speak each card as it appears and when it flips"))
         self.pronounce_btn.toggled.connect(self._persist_deck_prefs)
-        options.addWidget(self.size_label)
-        options.addWidget(self.size_spin)
-        options.addSpacing(8)
-        options.addWidget(self.shuffle_btn)
-        options.addWidget(self.pronounce_btn)
-        options.addStretch(1)
-        pv.addLayout(options)
-        pv.addSpacing(18)
+        deck_flow.addWidget(self.shuffle_btn)
+        deck_flow.addWidget(self.pronounce_btn)
 
-        actions = QHBoxLayout()
+        actions_widget = QWidget()
+        actions = QHBoxLayout(actions_widget)
+        actions.setContentsMargins(12, 0, 0, 0)
         actions.setSpacing(10)
-        actions.addStretch(1)
         self.start_btn = QPushButton(tr("Start session"), objectName="primaryButton")
         self.start_btn.setCursor(Qt.PointingHandCursor)
         self.start_btn.clicked.connect(self._start_clicked)
@@ -558,14 +756,38 @@ class FlashcardsPage(QWidget):
         self.play_btn.clicked.connect(self._play_clicked)
         actions.addWidget(self.start_btn)
         actions.addWidget(self.play_btn)
-        actions.addStretch(1)
-        pv.addLayout(actions)
-        pv.addSpacing(6)
-        self.picker_info = QLabel("", alignment=Qt.AlignCenter)
-        pv.addWidget(self.picker_info)
+        deck_flow.addWidget(actions_widget)
+        self.picker_info = QLabel("")
+        self.picker_info.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.picker_info.setMinimumHeight(34)
+        deck_flow.addWidget(self.picker_info)
+        bar.addWidget(flow_host)
+        pk.addWidget(self.picker_panel)
 
-        pw.addLayout(panel_row)
-        pw.addStretch(3)
+        # deck preview: header + scrollable equal-column grid of word cards
+        prh = QHBoxLayout()
+        self.preview_title = QLabel(tr("Deck preview"))
+        self.preview_count = QLabel("")
+        prh.addWidget(self.preview_title)
+        prh.addStretch(1)
+        prh.addWidget(self.preview_count)
+        pk.addSpacing(4)
+        pk.addLayout(prh)
+        self.preview_scroll = QScrollArea()
+        self.preview_scroll.setWidgetResizable(True)
+        self.preview_scroll.setFrameShape(QFrame.NoFrame)
+        self.preview_scroll.viewport().setAutoFillBackground(False)
+        self._preview_content = QWidget()
+        self._preview_content.setAutoFillBackground(False)
+        self._preview_flow = _CardGridLayout(self._preview_content,
+                                             min_item_width=250,
+                                             h_spacing=14, v_spacing=14)
+        self.preview_scroll.setWidget(self._preview_content)
+        pk.addWidget(self.preview_scroll, 1)
+        self.preview_empty = QLabel(tr("No words to practice."),
+                                    alignment=Qt.AlignCenter)
+        self.preview_empty.setVisible(False)
+        pk.addWidget(self.preview_empty, 1)
         self._stack.addWidget(picker)
 
         # ---- state 1: session ----------------------------------------
@@ -724,6 +946,7 @@ class FlashcardsPage(QWidget):
             return  # user already navigated away or started a session
         self._refresh_picker_info()
         self.logo.replay()
+        self._refresh_preview()
 
     def _checked_deck_kind(self):
         for kind, chip in self._deck_chips.items():
@@ -787,6 +1010,103 @@ class FlashcardsPage(QWidget):
         except Exception as exc:
             logging.error(f"Saving flashcard prefs failed: {exc}")
 
+    # ------------------------------------------------------------- preview
+
+    PREVIEW_MAX = 60  # widget count cap; a footer notes what's beyond it
+
+    def _on_deck_chip_toggled(self, _btn, on):
+        if on:
+            self._refresh_picker_info()
+            self._schedule_preview_refresh()
+
+    def _schedule_preview_refresh(self, *_args):
+        self._preview_timer.start()
+
+    def _refresh_preview(self):
+        """Rebuild the deck-preview grid for the current picker choices.
+
+        The deck itself resolves on the GUI thread (the provider reads the
+        DataFrame), then word rows and SM-2 schedules are fetched in a worker
+        so the picker never blocks on the database. A generation counter
+        drops results that a newer refresh has superseded."""
+        if (self._stack.currentIndex() != self.STATE_PICKER
+                or not self.isVisible()):
+            return
+        self._preview_gen += 1
+        gen = self._preview_gen
+        records = self._fetch_deck(self._checked_deck_kind(),
+                                   self.size_spin.value())
+        ids = [str(r.get("ID")) for r in records[:self.PREVIEW_MAX]
+               if r.get("ID") is not None]
+
+        def fetch():
+            return (self.db_adapter.get_words_by_ids(ids),
+                    dbq.srs_get_many(ids))
+
+        def done(result):
+            if gen == self._preview_gen:
+                rows, srs_map = result
+                self._populate_preview(records, rows, srs_map)
+
+        run_in_thread(fetch, on_result=done,
+                      on_error=lambda msg: logging.error(
+                          f"Deck preview fetch failed: {msg}"))
+
+    def _populate_preview(self, records, rows, srs_map):
+        self._clear_preview()
+        rows_by_id = {str(r.get("ID")): r for r in rows}
+        self._preview_defs = {}
+        shown = records[:self.PREVIEW_MAX]
+        for rec in shown:
+            wid = str(rec.get("ID"))
+            row = rows_by_id.get(wid, {})
+            parts = [str(row.get("Definition") or "").strip(),
+                     str(row.get("Definition2") or "").strip()]
+            definition = "\n\n".join(p for p in parts if p)
+            self._preview_defs[rec.get("ID")] = definition
+            due_text, due_key = self._due_badge(srs_map.get(wid))
+            card = _PreviewCard(rec, definition, due_text, due_key,
+                                self._colors, self._pronounce_record)
+            self._preview_flow.addWidget(card)
+            self._preview_cards.append(card)
+        if len(records) > len(shown):
+            more = QLabel(tr("…and {n} more").format(n=len(records) - len(shown)))
+            self._preview_flow.addWidget(more)
+            self._preview_more = more
+            self._style_preview_more()
+        n = len(records)
+        self.preview_count.setText(tr("{n} cards").format(n=n) if n else "")
+        self.preview_scroll.setVisible(bool(shown))
+        self.preview_empty.setVisible(not shown)
+
+    def _style_preview_more(self):
+        if self._preview_more is not None:
+            self._preview_more.setStyleSheet(
+                f"color:{self._colors['text_dim']};background:transparent;"
+                "font-size:9.5pt;")
+
+    def _clear_preview(self):
+        while self._preview_flow.count():
+            item = self._preview_flow.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._preview_cards = []
+        self._preview_more = None
+
+    def _due_badge(self, srs_row):
+        """(text, semantic key) for a card's SM-2 schedule badge."""
+        if not srs_row or not srs_row.get("review_count"):
+            return tr("New"), "new"
+        try:
+            due = datetime.fromisoformat(str(srs_row.get("next_review") or ""))
+        except ValueError:
+            return tr("New"), "new"
+        seconds = (due - datetime.now()).total_seconds()
+        if seconds <= 0:
+            return tr("Due"), "due"
+        return tr("In {n} d").format(n=max(1, int(seconds + 86399) // 86400)), "later"
+
     # ------------------------------------------------------------ session
 
     def _start_clicked(self):
@@ -820,7 +1140,8 @@ class FlashcardsPage(QWidget):
         self._index = 0
         self._correct = 0
         self._graded = set()
-        self._definitions = {}
+        # seed from the deck preview so cards flip without a DB round-trip
+        self._definitions = dict(self._preview_defs)
         self._autoplay = autoplay
         self._autoplay_paused = False
         self._autoplay_listened = 0
@@ -880,16 +1201,8 @@ class FlashcardsPage(QWidget):
             self._speak_cancel.set()
             self._speak_cancel = None
 
-    def _pronounce_side(self, side):
-        """Speak the given side of the current card, superseding any
-        pronunciation still in flight."""
-        if not self._deck:
-            return
-        rec = self._deck[self._index]
-        if side == 0:
-            text, language = rec.get("Word1"), rec.get("Language1")
-        else:
-            text, language = rec.get("Word2"), rec.get("Language2")
+    def _speak(self, text, language):
+        """Say `text`, superseding any pronunciation still in flight."""
         text = str(text or "").strip()
         if not text or language not in audio.lang_codes:
             return
@@ -900,6 +1213,20 @@ class FlashcardsPage(QWidget):
             audio.speak_word, text, language, cancel_event=cancel,
             on_error=lambda msg: logging.warning(
                 f"Flashcard pronunciation failed: {msg}"))
+
+    def _pronounce_record(self, record):
+        """Speaker button on a deck-preview card — say the word on demand."""
+        self._speak(record.get("Word1"), record.get("Language1"))
+
+    def _pronounce_side(self, side):
+        """Speak the given side of the current card."""
+        if not self._deck:
+            return
+        rec = self._deck[self._index]
+        if side == 0:
+            self._speak(rec.get("Word1"), rec.get("Language1"))
+        else:
+            self._speak(rec.get("Word2"), rec.get("Language2"))
 
     def _auto_pronounce(self, side):
         """Auto-speak on card change / flip (manual review only)."""
@@ -1051,6 +1378,8 @@ class FlashcardsPage(QWidget):
         self._stack.setCurrentIndex(self.STATE_PICKER)
         self._refresh_picker()
         self.logo.replay()
+        # statuses/schedules may have moved during the session
+        self._schedule_preview_refresh()
 
     # ----------------------------------------------------------- autoplay
 
@@ -1137,10 +1466,21 @@ class FlashcardsPage(QWidget):
         dim = f"color:{c['text_dim']};background:transparent;"
         self.picker_title.setStyleSheet(
             f"color:{c['text']};background:transparent;"
-            "font-size:16pt;font-weight:700;")
-        self.picker_sub.setStyleSheet(dim + "font-size:10.5pt;")
+            "font-size:13.5pt;font-weight:700;")
+        self.picker_sub.setStyleSheet(dim + "font-size:9.5pt;")
         self.picker_info.setStyleSheet(dim + "font-size:10pt;")
         self.size_label.setStyleSheet(dim + "font-size:10pt;")
+        self.preview_title.setStyleSheet(
+            f"color:{c['text']};background:transparent;"
+            "font-size:11pt;font-weight:700;")
+        self.preview_count.setStyleSheet(dim + "font-size:10pt;")
+        self.preview_empty.setStyleSheet(dim + "font-size:10.5pt;")
+        self.preview_scroll.setStyleSheet(
+            "QScrollArea{background:transparent;}"
+            "QScrollArea > QWidget > QWidget{background:transparent;}")
+        for card in self._preview_cards:
+            card.refresh_theme(c)
+        self._style_preview_more()
         self.progress_label.setStyleSheet(dim + "font-weight:600;")
         self.correct_label.setStyleSheet(
             f"color:{c['success']};background:transparent;font-weight:600;")
