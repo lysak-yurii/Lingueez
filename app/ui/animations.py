@@ -26,8 +26,7 @@ artifact-free: heavy pages (large table views) never relayout or repaint
 mid-animation.
 """
 from PySide6.QtCore import (
-    QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation,
-    QRectF, Qt, QVariantAnimation,
+    QEasingCurve, QPointF, QPropertyAnimation, QRectF, Qt, QVariantAnimation,
 )
 from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import (
@@ -192,11 +191,48 @@ def flip_swap(widget, work, duration=220, bg=None):
     shrink.start(QVariantAnimation.DeleteWhenStopped)
 
 
+class _SlideFadeOverlay(QWidget):
+    """One-pass transition frame: the outgoing snapshot slides out beneath the
+    incoming one dissolving in, both drawn directly with painter opacity.
+
+    A single paintEvent per tick replaces the previous two full-window
+    QLabels wrapped in QGraphicsOpacityEffect — the effect re-renders its
+    source into an offscreen buffer every frame, which made 4K fullscreen
+    switches crawl."""
+
+    def __init__(self, parent, old_pix, new_pix, direction, slide):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAutoFillBackground(True)
+        self._old = old_pix
+        self._new = new_pix
+        self._dir = direction
+        self._slide = slide
+        self._t = 0.0
+
+    def set_t(self, t):
+        self._t = float(t)
+        self.update()
+
+    def paintEvent(self, _event):  # noqa: N802
+        p = QPainter(self)
+        t = self._t
+        p.drawPixmap(QPointF(-self._dir * self._slide * t, 0), self._old)
+        p.setOpacity(t)
+        p.drawPixmap(QPointF(self._dir * self._slide * (1.0 - t), 0), self._new)
+        p.end()
+
+
 class AnimatedStackedWidget(QStackedWidget):
     """QStackedWidget with a slide + crossfade transition between pages."""
 
     DURATION = 220
     SLIDE = 42
+    # Snapshots are grabbed and blended on the CPU; beyond ~QHD the two grabs
+    # alone freeze the click for 100ms+ and the blend can't hold 60fps, so a
+    # 4K-fullscreen switch reads as jank, not polish. Above this many physical
+    # pixels the transition degrades to an instant switch.
+    MAX_ANIMATED_PIXELS = 6_500_000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -206,7 +242,10 @@ class AnimatedStackedWidget(QStackedWidget):
         old = self.currentIndex()
         if index == old:
             return
-        if self._overlay is not None or not self.isVisible():
+        dpr = self.devicePixelRatioF()
+        if (self._overlay is not None or not self.isVisible()
+                or self.width() * self.height() * dpr * dpr
+                > self.MAX_ANIMATED_PIXELS):
             self.setCurrentIndex(index)
             return
 
@@ -215,38 +254,21 @@ class AnimatedStackedWidget(QStackedWidget):
         self.setCurrentIndex(index)
         new_pix = self.currentWidget().grab()
 
-        overlay = QWidget(self)
-        overlay.setAttribute(Qt.WA_TransparentForMouseEvents)
-        overlay.setAutoFillBackground(True)
+        overlay = _SlideFadeOverlay(self, old_pix, new_pix, direction, self.SLIDE)
         overlay.setGeometry(self.rect())
         self._overlay = overlay
 
-        group = QParallelAnimationGroup(overlay)
-        for pix, start, end, fade_in in (
-            (old_pix, QPoint(0, 0), QPoint(-direction * self.SLIDE, 0), False),
-            (new_pix, QPoint(direction * self.SLIDE, 0), QPoint(0, 0), True),
-        ):
-            label = QLabel(overlay)
-            label.setPixmap(pix)
-            label.setGeometry(self.rect())
-            label.move(start)
-            effect = QGraphicsOpacityEffect(label)
-            label.setGraphicsEffect(effect)
-            slide = QPropertyAnimation(label, b"pos", label)
-            slide.setStartValue(start)
-            slide.setEndValue(end)
-            fade = QPropertyAnimation(effect, b"opacity", label)
-            fade.setStartValue(0.0 if fade_in else 1.0)
-            fade.setEndValue(1.0 if fade_in else 0.0)
-            for anim in (slide, fade):
-                anim.setDuration(self.DURATION)
-                anim.setEasingCurve(QEasingCurve.OutCubic)
-                group.addAnimation(anim)
+        anim = QVariantAnimation(overlay)
+        anim.setDuration(self.DURATION)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.valueChanged.connect(overlay.set_t)
+        anim.finished.connect(self._end_transition)
 
         overlay.show()
         overlay.raise_()
-        group.finished.connect(self._end_transition)
-        group.start(QParallelAnimationGroup.DeleteWhenStopped)
+        anim.start(QVariantAnimation.DeleteWhenStopped)
 
     def _end_transition(self):
         if self._overlay is not None:
