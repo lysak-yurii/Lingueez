@@ -65,6 +65,11 @@ DEFAULTS = {
     "playback_reviewing_listens": "3",     # listens to reach Reviewing
     "playback_learning_listens": "15",     # listens to reach Learning
     "playback_mastered_listens": "100",    # listens to reach Mastered
+    # Flashcards
+    "flashcards_deck_size": "20",          # default review-deck size
+    "flashcards_shuffle": "False",         # shuffle manual decks
+    "flashcards_autoswitch": "True",       # jump to Flashcards when Read Aloud starts
+    "flashcards_pronounce": "True",        # speak cards on show/flip in manual review
     # Reader
     "reader_translate_target": "English",  # word-popup translation target
     "reader_zoom": "0",                 # font-size pt offset (Ctrl+scroll / Ctrl +/-)

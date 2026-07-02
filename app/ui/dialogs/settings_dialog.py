@@ -460,6 +460,14 @@ class SettingsDialog(FramelessDialog):
         promote.toggled.connect(toggle_enabled)
         toggle_enabled(promote.isChecked())
 
+        flash_group = QGroupBox(tr("Flashcards"))
+        fform = QFormLayout(flash_group)
+        fform.addRow(tr("Open Flashcards when Read Aloud starts"),
+                     self._check("flashcards_autoswitch", True))
+        fform.addRow(tr("Default deck size"),
+                     self._spin("flashcards_deck_size", 1, 200, 20))
+        form.addRow(flash_group)
+
         note = QLabel(tr("Fully listening to a word in Read Aloud promotes it along the "
                          "familiarity ladder New → Reviewing → Learning → Mastered. Each "
                          "number is the total completed listens needed to reach that level — "

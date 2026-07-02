@@ -62,6 +62,7 @@ from app.ui.animations import AnimatedStackedWidget, crossfade_during, fade_swap
 from app.ui.brand_wordmark import BrandWordmark
 from app.ui.mini_player import MiniPlayer
 from app.ui.player import PlaybackSettingsPopup, PlayerBar, WordPlayer
+from app.ui.flashcards_page import FlashcardsPage
 from app.ui.texts_page import TextsPage
 from app.ui.stats_page import StatsPage
 from app.ui.toast import show_toast
@@ -77,7 +78,7 @@ from app.version import APP_ID, APP_NAME, APP_VERSION, BUILD_NUMBER
 GEOMETRY_FILE = "window_geometry.json"
 PREDEFINED_STATUSES = ["New", "To Learn", "Learning", "Mastered", "Ignored"]
 DEFAULT_HOTKEY = "Ctrl+Shift+V"
-PAGE_WORDS, PAGE_TEXTS, PAGE_STATS = 0, 1, 2
+PAGE_WORDS, PAGE_FLASHCARDS, PAGE_TEXTS, PAGE_STATS = 0, 1, 2, 3
 
 
 def _tray_icon_path() -> str:
@@ -326,8 +327,11 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._open_dialogs = {}
         self._tts_fallback_warned = False
-        self._page_search = {PAGE_WORDS: "", PAGE_TEXTS: "", PAGE_STATS: ""}
-        self._footer_counts = {PAGE_WORDS: tr("No data"), PAGE_TEXTS: tr("No texts yet"),
+        self._page_search = {PAGE_WORDS: "", PAGE_FLASHCARDS: "",
+                             PAGE_TEXTS: "", PAGE_STATS: ""}
+        self._footer_counts = {PAGE_WORDS: tr("No data"),
+                               PAGE_FLASHCARDS: tr("Flashcards"),
+                               PAGE_TEXTS: tr("No texts yet"),
                                PAGE_STATS: tr("Statistics")}
         self._words_subtitle = tr("Vocabulary")
         self._file_view = False  # viewing an opened Excel file (read-only preview)
@@ -497,6 +501,7 @@ class MainWindow(QMainWindow):
         if self.is_reading_active:
             self.read_button.setIcon(self._icon("stop", "danger", 17))
         self.action_tools.refresh_theme(self.colors)  # re-tint "⋯" + rebuild menu
+        self.flashcards_page.refresh_theme(self.colors)
         self.texts_page.refresh_theme(self.colors)
         self.stats_page.refresh_theme(self.colors)
         self.player_bar.refresh_theme(self.colors)
@@ -637,6 +642,9 @@ class MainWindow(QMainWindow):
         self.nav_words = nav_button("book-open", tr("Words"),
                                     lambda: self.switch_page(PAGE_WORDS),
                                     checkable=True, checked=True)
+        self.nav_flash = nav_button("layers", tr("Flashcards"),
+                                    lambda: self.switch_page(PAGE_FLASHCARDS),
+                                    checkable=True)
         self.nav_texts = nav_button("file-text", tr("Texts"),
                                     lambda: self.switch_page(PAGE_TEXTS),
                                     checkable=True)
@@ -1019,6 +1027,19 @@ class MainWindow(QMainWindow):
         wp.addWidget(table_wrap, 1)
         wp.addWidget(self.tb_row_bottom)  # chips + player drop here when stacked
 
+        self.flashcards_page = FlashcardsPage(
+            self.db_adapter, self.colors,
+            deck_provider=self._flashcards_deck,
+            settings_provider=lambda: self.settings)
+        self.flashcards_page.play_requested.connect(self._read_records_action)
+        self.flashcards_page.status_change_requested.connect(
+            self._apply_status_change)
+        self.flashcards_page.player_toggle_requested.connect(
+            self.word_player.toggle_pause)
+        self.flashcards_page.player_prev_requested.connect(self.word_player.prev)
+        self.flashcards_page.player_next_requested.connect(self.word_player.next)
+        self.flashcards_page.player_stop_requested.connect(self.word_player.stop)
+
         self.texts_page = TextsPage(self.db_adapter, self.colors)
         self.texts_page.counts_changed.connect(self._on_texts_counts)
         self.texts_page.tour_requested.connect(self.start_tour)
@@ -1026,6 +1047,7 @@ class MainWindow(QMainWindow):
         self.stats_page = StatsPage(self.db_adapter, self.colors)
 
         self.stack.addWidget(words_page)
+        self.stack.addWidget(self.flashcards_page)
         self.stack.addWidget(self.texts_page)
         self.stack.addWidget(self.stats_page)
         root.addWidget(self.stack, 1)
@@ -1554,8 +1576,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence.Copy, self.table, self.copy_selected)
         QShortcut(QKeySequence.Delete, self.table, self.delete_rows)
         QShortcut(QKeySequence("Ctrl+1"), self, lambda: self.switch_page(PAGE_WORDS))
-        QShortcut(QKeySequence("Ctrl+2"), self, lambda: self.switch_page(PAGE_TEXTS))
-        QShortcut(QKeySequence("Ctrl+3"), self, lambda: self.switch_page(PAGE_STATS))
+        QShortcut(QKeySequence("Ctrl+2"), self, lambda: self.switch_page(PAGE_FLASHCARDS))
+        QShortcut(QKeySequence("Ctrl+3"), self, lambda: self.switch_page(PAGE_TEXTS))
+        QShortcut(QKeySequence("Ctrl+4"), self, lambda: self.switch_page(PAGE_STATS))
 
     def _hotkey_setting(self):
         return (self.settings.get("hotkey", DEFAULT_HOTKEY) or "").strip()
@@ -1982,6 +2005,7 @@ class MainWindow(QMainWindow):
         while words-only controls (Add Word, search scope) hide elsewhere and
         search itself is disabled on the dashboard."""
         for btn, page, icon in ((self.nav_words, PAGE_WORDS, "book-open"),
+                                (self.nav_flash, PAGE_FLASHCARDS, "layers"),
                                 (self.nav_texts, PAGE_TEXTS, "file-text"),
                                 (self.nav_stats, PAGE_STATS, "bar-chart")):
             btn.setChecked(index == page)
@@ -2003,9 +2027,11 @@ class MainWindow(QMainWindow):
 
         on_words = index == PAGE_WORDS
         on_stats = index == PAGE_STATS
+        on_flash = index == PAGE_FLASHCARDS
         self._apply_responsive_header(index)  # add/scope: words-only & when wide
-        self.search_field.setVisible(not on_stats)
+        self.search_field.setVisible(not on_stats and not on_flash)
         subtitle = (self._words_subtitle if on_words
+                    else tr("Flashcards") if on_flash
                     else tr("Statistics") if on_stats else tr("Texts"))
         self.source_label.set_full_text(subtitle)
         self._update_file_view()
@@ -2015,6 +2041,8 @@ class MainWindow(QMainWindow):
             self.texts_page.load_texts()
         elif on_stats:
             self._refresh_stats()
+        elif on_flash:
+            self.flashcards_page.on_shown()
 
         if animate:
             self.stack.set_current_index_animated(index)
@@ -2746,7 +2774,27 @@ class MainWindow(QMainWindow):
         records = self._require_selection("read aloud")
         if not records:
             return
+        records = self._prepare_playback_records(records)
+        self._start_word_playback(records)
+        # Follow the audio on the Flashcards page: cards advance and flip in
+        # sync with what's being read.
+        if get_bool(self.settings, "flashcards_autoswitch", True):
+            self.flashcards_page.enter_autoplay(records)
+            self.switch_page(PAGE_FLASHCARDS)
 
+    def _read_records_action(self, records):
+        """Read-aloud requested by the Flashcards page's Play button: same
+        pipeline as `read_words_action`, already on the page (no switch)."""
+        if not records:
+            return
+        if self.is_reading_active:
+            self.word_player.stop()
+        records = self._prepare_playback_records(records)
+        self._start_word_playback(records)
+        self.flashcards_page.enter_autoplay(records)
+
+    def _prepare_playback_records(self, records):
+        """Shared read-aloud preflight: TTS-fallback warning + 200-word cap."""
         if not self._tts_fallback_warned:
             from app.core.audio import google_cloud_tts_problem
             problem = google_cloud_tts_problem()
@@ -2760,7 +2808,9 @@ class MainWindow(QMainWindow):
             records = records[:200]
             show_toast(self, tr("Selection limit"),
                        tr("Only the first 200 selected words will be read."), "info")
+        return records
 
+    def _start_word_playback(self, records):
         words = [(r.get('Word1', ''), r.get('Word2', '')) for r in records]
         languages = [(r.get('Language1', ''), r.get('Language2', '')) for r in records]
 
@@ -2856,9 +2906,11 @@ class MainWindow(QMainWindow):
         row = self.model.set_playing_id(record.get('ID'))
         if row >= 0:
             self.table.scrollTo(self.model.index(row, COL_WORD1))
+        self.flashcards_page.on_autoplay_index(i)
 
     def _on_player_part(self, slot):
         self.mini_player.set_active_part(slot)
+        self.flashcards_page.on_autoplay_part(slot)
 
     # mini-player transport routes to whichever player is currently active
     def _mini_prev(self):
@@ -2893,6 +2945,7 @@ class MainWindow(QMainWindow):
     def _on_player_state(self, paused):
         self.player_bar.set_paused(paused)
         self.mini_player.set_paused(paused)
+        self.flashcards_page.on_autoplay_state(paused)
 
     def _on_word_completed(self, i):
         """A word finished playing in full: record the listen and, if enabled,
@@ -2912,21 +2965,50 @@ class MainWindow(QMainWindow):
                 current = self._session_status.get(wid, rec.get('Status'))
                 target = progression.next_status(current, count, self._thresholds)
                 if target:
-                    self.db_adapter.update_word(wid, {'Status': target})
-                    self._session_status[wid] = target
-                    if self.df is not None:
-                        self.df.loc[self.df['ID'] == wid, 'Status'] = target
-                    self.model.update_status(wid, target)
-                    show_toast(self, tr("Promoted"),
-                               f"'{rec.get('Word1', '')}' → {target}", "success", 2500)
+                    self._apply_status_change(wid, target, rec.get('Word1', ''))
         except Exception as exc:
             logging.error(f"Playback status update failed: {exc}")
+
+    def _apply_status_change(self, wid, target, word_label=""):
+        """Promote a word's status (playback listens or flashcard grading):
+        synced DB update, DataFrame + table model refresh, and a toast."""
+        try:
+            self.db_adapter.update_word(wid, {'Status': target})
+            self._session_status[wid] = target
+            if self.df is not None:
+                self.df.loc[self.df['ID'] == wid, 'Status'] = target
+            self.model.update_status(wid, target)
+            show_toast(self, tr("Promoted"),
+                       f"'{word_label}' → {target}", "success", 2500)
+        except Exception as exc:
+            logging.error(f"Status update failed: {exc}")
+
+    def _flashcards_deck(self, kind, n):
+        """Deck source for the Flashcards page. `kind`: "selected" (table
+        selection), "filtered" (current Vocabulary filters), "newest", or
+        "due" (SM-2 schedule, most-overdue first)."""
+        n = max(1, int(n))
+        if kind == "selected":
+            return self.selected_records()[:n]
+        if self.df is None or self.df.empty:
+            return []
+        if kind == "filtered":
+            return self.word_filter.apply(self.df).head(n).to_dict("records")
+        if kind == "newest":
+            return self.df.head(n).to_dict("records")  # df is newest-first
+        if kind == "due":
+            ids = dbq.srs_due_word_ids(n)
+            by_id = {rec["ID"]: rec
+                     for rec in self.df[self.df["ID"].isin(ids)].to_dict("records")}
+            return [by_id[i] for i in ids if i in by_id]
+        return []
 
     def _on_player_finished(self):
         self._set_playback_ui(False)
         self.mini_player.hide()
         self.model.set_playing_id(None)
         self.model.set_queued_ids(())
+        self.flashcards_page.exit_autoplay()
         if self.stack.currentIndex() == PAGE_STATS:
             self._refresh_stats()
 

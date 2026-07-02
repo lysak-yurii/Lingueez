@@ -213,9 +213,10 @@ class SpotlightOverlay(QWidget):
             super().keyPressEvent(event)
 
 
-# Maps MainWindow.stack indices (PAGE_WORDS/TEXTS/STATS = 0/1/2) to tour keys.
-# Kept local so this module needn't import main_window.
-_PAGE_TO_TOUR = {0: "words", 1: "texts", 2: "stats"}
+# Maps MainWindow.stack indices (PAGE_WORDS/FLASHCARDS/TEXTS/STATS = 0/1/2/3)
+# to tour keys. Kept local so this module needn't import main_window.
+# The Flashcards page (1) has no tour yet.
+_PAGE_TO_TOUR = {0: "words", 2: "texts", 3: "stats"}
 
 
 class TourController(QObject):

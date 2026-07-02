@@ -262,6 +262,21 @@ def initialize_database(db_path=None):
         )
     ''')
 
+    # Local-only SM-2 spaced-repetition state for flashcard review (never
+    # synced to the cloud). One row per graded word; the resulting Status
+    # promotion goes through the normal synced words update instead.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS srs_progress (
+            word_id       TEXT PRIMARY KEY,
+            ease_factor   REAL NOT NULL DEFAULT 2.5,
+            interval_days INTEGER NOT NULL DEFAULT 0,
+            next_review   DATETIME,
+            review_count  INTEGER NOT NULL DEFAULT 0,
+            correct_count INTEGER NOT NULL DEFAULT 0,
+            updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     # Local trash ("Bin"). Deleting a word/text hard-deletes its row but first
     # stashes the full payload (and tags, for words) here, so it can be restored
     # even without cloud sync. A grace period purges old entries. payload/tags are
@@ -311,6 +326,7 @@ def initialize_database(db_path=None):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_review_events_word ON review_events(word_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_review_events_day ON review_events(played_at)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_bin_items_deleted ON bin_items(deleted_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_srs_next_review ON srs_progress(next_review)')
 
     conn.commit()
     conn.close()
@@ -623,6 +639,68 @@ def get_play_count(word_id, db_path=None):
     n = cursor.fetchone()[0]
     conn.close()
     return int(n or 0)
+
+
+def srs_get(word_id, db_path=None):
+    """The word's SM-2 scheduling row as a dict, or None if never graded."""
+    db_path = db_path or get_active_db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM srs_progress WHERE word_id = ?', (str(word_id),))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def srs_upsert(word_id, fields, db_path=None):
+    """Insert or replace a word's SM-2 scheduling state.
+
+    ``fields`` is the dict returned by :func:`app.core.srs.apply_grade`.
+    """
+    db_path = db_path or get_active_db_path()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO srs_progress
+            (word_id, ease_factor, interval_days, next_review,
+             review_count, correct_count, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(word_id) DO UPDATE SET
+            ease_factor = excluded.ease_factor,
+            interval_days = excluded.interval_days,
+            next_review = excluded.next_review,
+            review_count = excluded.review_count,
+            correct_count = excluded.correct_count,
+            updated_at = CURRENT_TIMESTAMP
+    ''', (str(word_id), fields['ease_factor'], fields['interval_days'],
+          fields['next_review'], fields['review_count'], fields['correct_count']))
+    conn.commit()
+    conn.close()
+
+
+def srs_due_word_ids(limit, now_iso=None, db_path=None):
+    """IDs of words due for flashcard review, most-overdue first.
+
+    Never-graded words count as due (no srs row / NULL next_review), matching
+    the web app's ``next_review <= now OR NULL`` selection. ``Ignored`` words
+    are excluded — the user opted them out of studying.
+    """
+    db_path = db_path or get_active_db_path()
+    now_iso = now_iso or datetime.now().isoformat(timespec='seconds')
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT w.ID
+        FROM words w LEFT JOIN srs_progress s ON s.word_id = w.ID
+        WHERE COALESCE(w.Status, '') != 'Ignored'
+          AND (s.next_review IS NULL OR s.next_review <= ?)
+        ORDER BY s.next_review ASC, COALESCE(s.review_count, 0) ASC
+        LIMIT ?
+    ''', (now_iso, int(limit)))
+    ids = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return ids
 
 
 def get_review_aggregates(top=8, db_path=None):

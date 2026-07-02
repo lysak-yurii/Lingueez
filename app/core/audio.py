@@ -352,29 +352,103 @@ def save_audio_file(words, file_path, languages, progress_callback=None, is_canc
 
 _speak_lock = threading.Lock()
 
+# Small pronunciation cache so callers (flashcards) can prefetch upcoming
+# words and speak_word starts instantly instead of waiting on synthesis.
+# Keyed by (text, tts lang code). Files are also tracked in all_temp_files,
+# so stop_playback()/shutdown cleanup may delete them underneath us at any
+# time — lookups must tolerate a vanished file and re-synthesize.
+_pronounce_cache = {}
+_pronounce_cache_lock = threading.Lock()
+_PRONOUNCE_CACHE_MAX = 16
 
-def speak_word(word, language):
+
+def _pronounce_cache_get(key):
+    with _pronounce_cache_lock:
+        filename = _pronounce_cache.get(key)
+    if filename and not os.path.exists(filename):
+        with _pronounce_cache_lock:
+            if _pronounce_cache.get(key) == filename:
+                del _pronounce_cache[key]
+        return None
+    return filename
+
+
+def _pronounce_cache_put(key, filename):
+    evicted = []
+    with _pronounce_cache_lock:
+        old = _pronounce_cache.pop(key, None)
+        if old and old != filename:
+            evicted.append(old)
+        _pronounce_cache[key] = filename
+        while len(_pronounce_cache) > _PRONOUNCE_CACHE_MAX:
+            oldest = next(iter(_pronounce_cache))
+            evicted.append(_pronounce_cache.pop(oldest))
+    for stale in evicted:
+        _remove_temp_file(stale)
+
+
+def prefetch_word(word, language, cancel_event=None):
+    """Synthesize *word* ahead of time so a later speak_word plays instantly.
+
+    Silently does nothing on bad input, cancellation, synthesis failure, or
+    when the word is already cached — prefetching is best-effort.
+    """
+    word = (word or "").strip()
+    if not word or language not in lang_codes:
+        return
+    key = (word, lang_codes[language])
+    if _pronounce_cache_get(key):
+        return
+    filename = synthesize_speech(word, lang_codes[language],
+                                 cancellation_event=cancel_event)
+    if not filename:
+        return
+    with temp_files_lock:
+        all_temp_files.add(filename)
+    _pronounce_cache_put(key, filename)
+
+
+def speak_word(word, language, cancel_event=None):
     """Speak a single word synchronously. Raises ValueError on bad input.
 
     Serialized with a lock: concurrent pygame.mixer.music access from
-    multiple threads can crash SDL.
+    multiple threads can crash SDL. ``cancel_event`` (a ``threading.Event``)
+    aborts cleanly at any stage — before synthesis, before playback, or
+    mid-playback — so rapid re-triggers (e.g. flipping flashcards) can
+    supersede a stale pronunciation instead of queueing behind it.
     """
     if not word.strip():
         raise ValueError("Please enter a word to speak.")
     if language not in lang_codes:
         raise ValueError(f"Unsupported language: {language}")
+    if cancel_event is not None and cancel_event.is_set():
+        return
 
-    filename = synthesize_speech(word, lang_codes[language])
+    key = (word.strip(), lang_codes[language])
+    filename = _pronounce_cache_get(key)
     if not filename:
-        raise RuntimeError("Failed to generate speech. Check your TTS provider settings.")
+        filename = synthesize_speech(word, lang_codes[language],
+                                     cancellation_event=cancel_event)
+        if not filename:
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            raise RuntimeError("Failed to generate speech. Check your TTS provider settings.")
+        with temp_files_lock:
+            all_temp_files.add(filename)
+        # keep it: an immediate replay (speaker button) is then instant
+        _pronounce_cache_put(key, filename)
 
-    all_temp_files.add(filename)
     with _speak_lock:
+        if cancel_event is not None and cancel_event.is_set():
+            return
         try:
             pygame.mixer.music.load(filename)
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
+                if cancel_event is not None and cancel_event.is_set():
+                    pygame.mixer.music.stop()
+                    break
                 pygame.time.Clock().tick(10)
             pygame.mixer.music.unload()
-        finally:
-            _remove_temp_file(filename)
+        except pygame.error as exc:
+            logging.error(f"Pronunciation playback error: {exc}")

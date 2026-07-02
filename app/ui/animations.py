@@ -26,8 +26,10 @@ artifact-free: heavy pages (large table views) never relayout or repaint
 mid-animation.
 """
 from PySide6.QtCore import (
-    QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation, Qt,
+    QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation,
+    QRectF, Qt, QVariantAnimation,
 )
+from PySide6.QtGui import QColor, QPainter, QPalette
 from PySide6.QtWidgets import (
     QApplication, QGraphicsOpacityEffect, QLabel, QStackedWidget, QWidget,
 )
@@ -114,6 +116,80 @@ def fade_swap(widget, duration=140):
     anim.setEasingCurve(QEasingCurve.OutCubic)
     anim.finished.connect(snap.deleteLater)
     anim.start(QPropertyAnimation.DeleteWhenStopped)
+
+
+class _FlipSnapshot(QWidget):
+    """Overlay that paints a snapshot horizontally squashed toward its center,
+    with the page background filling the exposed sides — a card seen mid-turn."""
+
+    def __init__(self, parent, bg):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._pix = None
+        self._factor = 1.0
+        self._bg = bg
+
+    def set_pixmap(self, pix):
+        self._pix = pix
+        self.update()
+
+    def set_factor(self, factor):
+        self._factor = float(factor)
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self._bg)
+        if self._pix is not None and self._factor > 0.01:
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            w = self.width() * self._factor
+            target = QRectF((self.width() - w) / 2, 0, w, self.height())
+            painter.drawPixmap(target, self._pix, QRectF(self._pix.rect()))
+        painter.end()
+
+
+def flip_swap(widget, work, duration=220, bg=None):
+    """Fake a horizontal card flip while `work()` swaps the widget's contents.
+
+    Phase one squashes a snapshot of the current state to a vertical sliver
+    (the card edge-on), `work()` re-renders the widget underneath, and phase
+    two expands a fresh snapshot back to full width. `bg` is the color behind
+    the turning card — pass the page background so the reveal reads as the
+    card rotating in place; defaults to the widget's palette window color.
+    """
+    if not widget.isVisible():
+        work()
+        return
+    color = QColor(bg) if bg is not None else widget.palette().color(QPalette.Window)
+    overlay = _FlipSnapshot(widget, color)
+    overlay.setGeometry(widget.rect())
+    overlay.set_pixmap(widget.grab())
+    overlay.show()
+    overlay.raise_()
+    half = max(1, int(duration) // 2)
+
+    def _expand():
+        work()
+        if widget.layout() is not None:
+            widget.layout().activate()
+        overlay.set_pixmap(widget.grab())
+        anim = QVariantAnimation(overlay)
+        anim.setDuration(half)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.valueChanged.connect(overlay.set_factor)
+        anim.finished.connect(overlay.deleteLater)
+        anim.start(QVariantAnimation.DeleteWhenStopped)
+
+    shrink = QVariantAnimation(overlay)
+    shrink.setDuration(half)
+    shrink.setStartValue(1.0)
+    shrink.setEndValue(0.0)
+    shrink.setEasingCurve(QEasingCurve.InCubic)
+    shrink.valueChanged.connect(overlay.set_factor)
+    shrink.finished.connect(_expand)
+    shrink.start(QVariantAnimation.DeleteWhenStopped)
 
 
 class AnimatedStackedWidget(QStackedWidget):

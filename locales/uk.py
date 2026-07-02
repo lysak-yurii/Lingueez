@@ -1537,6 +1537,43 @@ TRANSLATIONS: dict[str, str] = {
     "Terms": "Умови",
     "Website": "Вебсайт",
     "Contact": "Контакти",
+
+    # ── Flashcards ──────────────────────────────────────────────────────────
+    "Flashcards": "Флеш-картки",
+    "Practice your vocabulary": "Практикуйте свій словниковий запас",
+    "Due cards": "Картки до повторення",
+    "Current filter": "Поточний фільтр",
+    "Newest": "Найновіші",
+    "Selected words": "Вибрані слова",
+    "Deck size": "Розмір колоди",
+    "Default deck size": "Стандартний розмір колоди",
+    "Shuffle": "Перемішати",
+    "Start session": "Почати сесію",
+    "Play deck": "Відтворити колоду",
+    "{n} cards ready to review": "Карток до повторення: {n}",
+    "No cards due — great job!": "Немає карток до повторення — чудова робота!",
+    "{n} selected words": "Вибраних слів: {n}",
+    "No words to practice.": "Немає слів для практики.",
+    "End session": "Завершити сесію",
+    "Listening — pause to review manually":
+        "Прослуховування — призупиніть, щоб повторювати вручну",
+    "Show answer": "Показати відповідь",
+    "Hard": "Важко",
+    "Good": "Добре",
+    "Easy": "Легко",
+    "Space or click to flip": "Пробіл або клік, щоб перевернути",
+    "Card {current} of {total}": "Картка {current} з {total}",
+    "{n} correct": "Правильно: {n}",
+    "Session complete!": "Сесію завершено!",
+    "You listened to {n} of {total} cards.": "Ви прослухали {n} з {total} карток.",
+    "Correct: {n} of {total}": "Правильно: {n} з {total}",
+    "New session": "Нова сесія",
+    "Open Flashcards when Read Aloud starts":
+        "Відкривати Флеш-картки під час запуску читання вголос",
+    "Stop": "Зупинити",
+    "Auto-pronounce": "Автоозвучення",
+    "Speak each card as it appears and when it flips":
+        "Озвучувати кожну картку, коли вона з'являється та перевертається",
 }
 
 # Date names, read by app.i18n. Months are in the genitive case because they
